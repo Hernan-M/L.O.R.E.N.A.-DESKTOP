@@ -63,22 +63,23 @@ def frame_manipulate(img):
         img.flags.writeable = False
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.flip(img, 1)
-        results = face_detection.process(img)
+        # results = face_detection.process(img)
         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        coordinates = None
-        zoom_transition = None
-        if results.detections:
-            for detection in results.detections:
-                height, width, _ = img.shape
-                left_eye = detection.location_data.relative_keypoints[1]
-                right_ear = detection.location_data.relative_keypoints[4]
-                left_ear = detection.location_data.relative_keypoints[5]
+        img = cv2.blur(img, (10,10))
+        # coordinates = None
+        # zoom_transition = None
+        # if results.detections:
+        #     for detection in results.detections:
+        #         height, width, _ = img.shape
+        #         left_eye = detection.location_data.relative_keypoints[1]
+        #         right_ear = detection.location_data.relative_keypoints[4]
+        #         left_ear = detection.location_data.relative_keypoints[5]
 
-                right_ear_x = int(right_ear.x * width)
-                left_ear_x = int(left_ear.x * width)
+                # right_ear_x = int(right_ear.x * width)
+                # left_ear_x = int(left_ear.x * width)
 
-                center_x = int(left_eye.x * width)
-                center_y = int(left_eye.y * height)
+                # center_x = int(left_eye.x * width)
+                # center_y = int(left_eye.y * height)
                 
                 # coordinates = [center_x, center_y]
                 # if (left_ear_x - right_ear_x) < 120:
@@ -97,7 +98,7 @@ def mouse_tracking():
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, screen_w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, screen_h)
-    cap.set(cv2.CAP_PROP_FPS, 120)
+    cap.set(cv2.CAP_PROP_FPS, 60)
 
     while True:
         success, img = cap.read()
@@ -121,7 +122,6 @@ def mouse_tracking():
             right_iris_landmark = [landmarks[RIGHT_IRIS[0]], landmarks[RIGHT_IRIS[2]]]
 
             absolute_iris_x, absolute_iris_y, absolute_iris_z = ((right_iris_landmark[0].x + right_iris_landmark[1].x) / 2, (right_iris_landmark[0].y + right_iris_landmark[1].y) / 2, (right_iris_landmark[0].z + right_iris_landmark[1].z) / 2)
-            
             
 
             #esse aq so mostra msm
@@ -150,13 +150,14 @@ def mouse_tracking():
             cv2.putText(img, f'x: {percent_iris_x}%, y: {percent_iris_y}% -> iris percent' ,(10, 200),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,255 )
 
 
-            if absolute_iris_z > 0.0001:
+            if absolute_iris_z > 0.001:
                 cv2.putText(img, 'ta longe fi de rapariga' ,(500, 500),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,255 )
 
             if( percent_iris_x < 100 and  percent_iris_y < 100): 
-                point_x = convert_percent(percent_iris_x, screen_w, 3)
+                point_x = convert_percent(percent_iris_x, screen_w, 3.1)
                 point_y = convert_percent(percent_iris_y, screen_h, 5)
-                cv2.putText(img, f'x: {point_x}, y: a -> pos iris' ,(10, 150),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,255 )
+                cv2.putText(img, f'x: {point_x}, y: {point_y} -> pos iris' ,(10, 150),cv2.FONT_HERSHEY_COMPLEX_SMALL,1,255 )
+                # pyautogui.moveTo(point_x, point_y)
                 cv2.circle(img, (point_x, point_y), 20, (0, 255, 0), 10)
                 
             # else : 
@@ -214,7 +215,7 @@ def convert_percent(percent, screen, sensibility):
         if (0 >= converted_value):
              return 0
         elif (converted_value > screen): 
-             return screen
+             return screen - 1
         else: 
             return int(converted_value)
 
