@@ -1,7 +1,6 @@
 from tkinter import Tk, PhotoImage
 from tkinter.ttk import Frame, Label, Button, Style
 
-
 class Menu:
     
     @staticmethod
