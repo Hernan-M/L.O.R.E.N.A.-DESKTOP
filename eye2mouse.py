@@ -8,25 +8,35 @@ from tkinter.ttk import Frame, Label, Button, Style
 import threading
 import time
 import ctypes
-from typing_extensions import Literal
 from ui import menu
+import json
+import os
 
 gaze = GazeTracking()
 webcam = cv2.VideoCapture(0)
+
 alert_asset = cv2.imread("ui/assets/imgs/alert.png")
+calibration_path = "settings/calibration"
+os.makedirs(calibration_path, exist_ok=True)
 
 screen_w, screen_h = pyautogui.size()
+
 ratio_x, ratio_y = None, None
 frame, ret = None, False
 tracking_thread_started = False
 avg_click_data = {}
 
 def play():
-    try:
-        tracking_thread_started = True
-        start_mouse_tracking()
-    except Exception as e:
-        error(f"Erro de rastreio: {e}")
+    if avg_click_data:
+        try:
+            img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+            cv2.imshow('pleyou', img)
+            tracking_thread_started = True
+            start_mouse_tracking()
+        except Exception as e:
+            error(f"Erro de rastreio: {e}")
+    else:
+        alert("Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
 
 def mouse_tracking():
     global ratio_x, ratio_y, frame, ret
@@ -42,8 +52,10 @@ def mouse_tracking():
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio() 
             
-            if avg_click_data:
+            if avg_click_data and ratio_x is not None and ratio_y is not None:
                 pyautogui.moveTo(calculate_width_ratio()) 
+            elif avg_click_data and ratio_x is None and ratio_y is None:
+                error_face()
 
             time.sleep(0.2)
 
@@ -143,7 +155,7 @@ def calibrate():
                 try : 
                     click_data[current_point].append((ratio_x, ratio_y))
                 except: 
-                    error_calibrate()
+                    error_face()
                 num_clicks = len(click_data[current_point])
                 if num_clicks == 1:
                     colors[current_point] = (0, 255, 255)
@@ -152,7 +164,7 @@ def calibrate():
                 elif num_clicks == 3:
                     current_point += 1
             else:
-                error_calibrate()
+                error_face()
 
     cv2.namedWindow('Calibracao', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Calibracao', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -179,8 +191,26 @@ def calibrate():
 
     tracking_thread.allDone = True;
     tracking_thread_started = False
+    save_calibration_data()
     return avg_click_data
 
+def save_calibration_data():
+    if avg_click_data:
+        try:
+            name = os.path.join(calibration_path, "calibration_data.txt")
+            with open(name, "w") as archive:
+                json.dump(avg_click_data, archive, indent=4)
+            alert("Calibração salva com sucesso!")
+        except Exception as e:
+            error(f"Erro ao salvar dados de calibração: {e}")
+
+def load_calibration_data():
+    try:
+        name = os.path.join(calibration_path, "calibration_data.txt")
+        with open(name, "r") as archive:
+            return json.load(archive)
+    except Exception as e:
+        return {}
 
 def error(message):
     ctypes.windll.user32.MessageBoxW(
@@ -191,7 +221,7 @@ def error(message):
     )
     return
 
-def error_calibrate():
+def error_face():
     error("Rastreio não identificado, alinhe seu rosto com a câmera e tente novamente.")
     face_detect()
 
@@ -225,6 +255,7 @@ def calculate_width_ratio():
 
     relative_total_x = col_right - col_left
     relative_total_y = row_bottom - row_top
+    # breakpoint()
     if relative_total_x == 0 or relative_total_y == 0:
         raise ValueError("Intervalo entre colunas ou linhas não pode ser zero.")
 
@@ -235,21 +266,22 @@ def calculate_width_ratio():
     # Garantindo o range das laterais da tela
     ratio_x_normalized = max(min(ratio_x, col_right), col_left)
     ratio_y_normalized = max(min(ratio_y, row_bottom), row_top)
-
+    
     # Calcular os valores em pixels maiores que 0
     value_px_x = max((ratio_x_normalized - col_left) * scale_x, 10)
     value_px_y = max((ratio_y_normalized - row_top) * scale_y, 10) 
-
     value_px_x = screen_w - 10 if value_px_x > screen_w else value_px_x
     value_px_y = screen_h - 10 if value_px_x > screen_h else value_px_y
     print(value_px_x, value_px_y)
+    breakpoint()
     return value_px_x, value_px_y
 
 
 
 
 
-def main():
+def main(): 
+        avg_click_data = load_calibration_data()
         # Configuração da janela principal
         root = Tk()
         root.title('L.O.R.E.N.A.')
@@ -295,11 +327,17 @@ def main():
         base = Frame(borda)
         base.pack()
 
-        Button(base, text='Play', command=start_mouse_tracking, cursor='hand1').pack(fill='x', pady=(0, 10))
+        Button(base, text='Play', command=play, cursor='hand1').pack(fill='x', pady=(0, 10))
         Button(base, text='Calibrar', command=calibrate, cursor='hand1').pack(fill='x', pady=(0, 10))
 
-        # Executa a interface
+        root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
         root.mainloop()
+
+def on_close(root):
+    webcam.release()
+    cv2.destroyAllWindows()
+    root.destroy()
+
 
 
 def configure_style():

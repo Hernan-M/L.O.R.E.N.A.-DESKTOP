@@ -42,6 +42,7 @@ class GazeTracking(object):
     def _analyze(self):
         """Detects the face and initialize Eye objects"""
         frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+        frame = cv2.GaussianBlur(self.frame, (11, 11), 0)
         faces = self._face_detector(frame)
 
         try:

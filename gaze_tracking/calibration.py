@@ -10,7 +10,7 @@ class Calibration(object):
     """
 
     def __init__(self):
-        self.nb_frames = 20
+        self.nb_frames = 30
         self.thresholds_left = []
         self.thresholds_right = []
 
