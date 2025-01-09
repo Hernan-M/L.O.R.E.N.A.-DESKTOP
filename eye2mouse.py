@@ -11,6 +11,10 @@ import ctypes
 from ui import menu
 import json
 import os
+from threading import Lock
+
+
+frame_lock = Lock()
 
 gaze = GazeTracking()
 webcam = cv2.VideoCapture(0)
@@ -23,15 +27,17 @@ screen_w, screen_h = pyautogui.size()
 
 ratio_x, ratio_y = None, None
 frame, ret = None, False
-tracking_thread_started = False
 avg_click_data = {}
 
+# flags states
+is_on_calibrate = False
+tracking_thread_running = False
+tracking_thread = None
+
 def play():
+    global tracking_thread_running
     if avg_click_data:
         try:
-            img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
-            cv2.imshow('pleyou', img)
-            tracking_thread_started = True
             start_mouse_tracking()
         except Exception as e:
             error(f"Erro de rastreio: {e}")
@@ -39,9 +45,12 @@ def play():
         alert("Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
 
 def mouse_tracking():
-    global ratio_x, ratio_y, frame, ret
+    global ratio_x, ratio_y, frame, ret, is_on_calibrate
     try:
-        while True:
+       while True:
+            with frame_lock:
+                if not tracking_thread_running:  # Verifica se a thread deve parar
+                    break
             ret, frame = webcam.read()
             frame = cv2.flip(frame, 1)
             if not ret:
@@ -51,10 +60,17 @@ def mouse_tracking():
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio() 
-            
-            if avg_click_data and ratio_x is not None and ratio_y is not None:
-                pyautogui.moveTo(calculate_width_ratio()) 
-            elif avg_click_data and ratio_x is None and ratio_y is None:
+            print('cu')
+            if not is_on_calibrate and ratio_x and ratio_y:
+                face_detect()
+                img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+                cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
+                cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                cv2.imshow('pleyou', img)
+                coord = calculate_width_ratio()
+                cv2.circle(img, coord, 3, (0, 0, 255))
+                
+            elif avg_click_data and ratio_x is None:
                 error_face()
 
             time.sleep(0.2)
@@ -63,27 +79,33 @@ def mouse_tracking():
             #     alert("Detecção interrompida pelo usuário.")
             #     break
     except Exception as e:
+        breakpoint()
         error(f"Erro de rastreio: {e}")
 
 def start_mouse_tracking():
-    global tracking_thread_started, tracking_thread
-    if not tracking_thread_started:
-        tracking_thread = threading.Thread(target=mouse_tracking, daemon=True)
-        tracking_thread.start()
-        tracking_thread_started = True
+    global tracking_thread, tracking_thread_running
+    with frame_lock:
+        print(tracking_thread_running)
+        if not tracking_thread_running:
+            print('aisadasdas')
+            tracking_thread_running = True
+            tracking_thread = threading.Thread(target=mouse_tracking, daemon=True)
+            tracking_thread.start()
 
 def face_detect():
-    global frame, ret, ratio_x, ratio_y
+    global ratio_x, ratio_y
 
     start_time = None  
     detection_started = False
 
     while True:
+        frame, ret = webcam.read()
         if frame is None or not ret:
             alert("Falha ao capturar imagem da webcam")
             break
         
         debug_frame = frame.copy()
+        middle_cam = int(webcam.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
 
         if ratio_x and ratio_y:
             if not detection_started:
@@ -95,7 +117,7 @@ def face_detect():
             cv2.putText(
                 debug_frame,
                 f"Mantenha sua posição por {5 - int(elapsed_time)} segundos!",
-                (50, 50),
+                (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (0, 255, 0),
@@ -111,9 +133,9 @@ def face_detect():
             cv2.putText(
                 debug_frame,
                 "Alinhe seu rosto de acordo com a marcação!",
-                (50, 50),
+                (20, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1,
+                0.5,
                 (0, 255, 255),
                 1,
                 cv2.LINE_AA,
@@ -123,9 +145,7 @@ def face_detect():
         frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
         cv2.imshow("Deteccao", frame_mesc)
 
-        width_cam = webcam.get(cv2.CAP_PROP_FRAME_WIDTH)
-        
-        cv2.moveWindow('Deteccao', int(screen_w/2 - width_cam/2), 0)
+        cv2.moveWindow('Deteccao', int(screen_w / 2 - middle_cam), 0)
 
         # Permitir sair manualmente pressionando 'ESC'
         if cv2.waitKey(1) & 0xFF == 27:
@@ -135,6 +155,8 @@ def face_detect():
     cv2.destroyWindow('Deteccao')
 
 def calibrate():
+    global is_on_calibrate, tracking_thread, tracking_thread_running
+    is_on_calibrate = True
     alert("Olhe para os pontos indicados em azul e clique com o botão esquerdo do mouse até os pontos ficarem verdes para calibrar o sistema")
     start_mouse_tracking()
     points = [(x, y) for x in [0, screen_w // 2, screen_w] for y in [0, screen_h // 2, screen_h]]
@@ -189,9 +211,11 @@ def calibrate():
             avg_y = sum(y for x, y in clicks) / 3
             avg_click_data[i] = (avg_x, avg_y)
 
-    tracking_thread.allDone = True;
-    tracking_thread_started = False
+    with frame_lock:
+        tracking_thread_running = False
+    tracking_thread.join()
     save_calibration_data()
+    is_on_calibrate = False
     return avg_click_data
 
 def save_calibration_data():
@@ -223,6 +247,7 @@ def error(message):
 
 def error_face():
     error("Rastreio não identificado, alinhe seu rosto com a câmera e tente novamente.")
+    print('aiiuaa')
     face_detect()
 
 def alert(message):
@@ -271,16 +296,16 @@ def calculate_width_ratio():
     value_px_x = max((ratio_x_normalized - col_left) * scale_x, 10)
     value_px_y = max((ratio_y_normalized - row_top) * scale_y, 10) 
     value_px_x = screen_w - 10 if value_px_x > screen_w else value_px_x
-    value_px_y = screen_h - 10 if value_px_x > screen_h else value_px_y
+    value_px_y = screen_h - 10 if value_px_y > screen_h else value_px_y
     print(value_px_x, value_px_y)
-    breakpoint()
-    return value_px_x, value_px_y
+    return int(value_px_x), int(value_px_y)
 
 
 
 
 
 def main(): 
+        global avg_click_data
         avg_click_data = load_calibration_data()
         # Configuração da janela principal
         root = Tk()
