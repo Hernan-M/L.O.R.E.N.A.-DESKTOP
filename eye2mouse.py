@@ -33,19 +33,24 @@ avg_click_data = {}
 is_on_calibrate = False
 tracking_thread_running = False
 tracking_thread = None
+loaded_calibration_file = False
 
 def play():
     global tracking_thread_running
     if avg_click_data:
         try:
             start_mouse_tracking()
+            face_detect()
         except Exception as e:
             error(f"Erro de rastreio: {e}")
+            cv2.destroyAllWindows()
+            main();
     else:
         alert("Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
 
 def mouse_tracking():
     global ratio_x, ratio_y, frame, ret, is_on_calibrate
+    alert('Para sair do rastreio ocular aperte ESC')
     try:
        while True:
             with frame_lock:
@@ -59,47 +64,49 @@ def mouse_tracking():
 
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
-            ratio_y = gaze.vertical_ratio() 
-            print('cu')
-            if not is_on_calibrate and ratio_x and ratio_y:
-                face_detect()
-                img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
-                cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
-                cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-                cv2.imshow('pleyou', img)
+            ratio_y = gaze.vertical_ratio()
+
+            # cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
+            # cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            # img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+            # cv2.imshow('pleyou', img)
+
+            if not is_on_calibrate and ratio_x is not None and ratio_y is not None:
                 coord = calculate_width_ratio()
-                cv2.circle(img, coord, 3, (0, 0, 255))
+                pyautogui.moveTo(coord)
+                # cv2.circle(img, coord, 3, (0, 0, 255))
+                #breakpoint()
                 
             elif avg_click_data and ratio_x is None:
-                error_face()
+                alert('tente ficar próximo a câmera e verifique a iluminação do ambiente')
 
             time.sleep(0.2)
+            
 
-            # if cv2.waitKey(1) & 0xFF == 27:
-            #     alert("Detecção interrompida pelo usuário.")
-            #     break
+            if cv2.waitKey(1) & 0xFF == 27:
+                alert("Detecção interrompida pelo usuário.")
+                break
+
     except Exception as e:
-        breakpoint()
         error(f"Erro de rastreio: {e}")
+
 
 def start_mouse_tracking():
     global tracking_thread, tracking_thread_running
     with frame_lock:
-        print(tracking_thread_running)
         if not tracking_thread_running:
-            print('aisadasdas')
             tracking_thread_running = True
             tracking_thread = threading.Thread(target=mouse_tracking, daemon=True)
             tracking_thread.start()
 
 def face_detect():
-    global ratio_x, ratio_y
+    global ratio_x, ratio_y, frame, ret
 
     start_time = None  
     detection_started = False
-
+    
     while True:
-        frame, ret = webcam.read()
+        ret, frame = webcam.read()
         if frame is None or not ret:
             alert("Falha ao capturar imagem da webcam")
             break
@@ -114,32 +121,16 @@ def face_detect():
 
             elapsed_time = time.time() - start_time
 
-            cv2.putText(
-                debug_frame,
-                f"Mantenha sua posição por {5 - int(elapsed_time)} segundos!",
-                (20, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
-                1,
-                cv2.LINE_AA,
-            )
+            cv2.putText(debug_frame, f"Mantenha sua posição por {5 - int(elapsed_time)} segundos!",
+                            (20, 50),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0, 255, 0),1,cv2.LINE_AA)
 
             if elapsed_time >= 5: 
                 alert("Detecção concluída com sucesso!")
                 break
 
         else:
-            cv2.putText(
-                debug_frame,
-                "Alinhe seu rosto de acordo com a marcação!",
-                (20, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
+            cv2.putText( debug_frame, "Alinhe seu rosto de acordo com a marcação!", (20, 50), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
             detection_started = False
 
         frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
@@ -214,7 +205,13 @@ def calibrate():
     with frame_lock:
         tracking_thread_running = False
     tracking_thread.join()
-    save_calibration_data()
+
+    if len(avg_click_data) == 8:
+        save_calibration_data()  
+    else:
+        alert('Erro ao calibrar!')
+        cv2.destroyAllWindows()
+
     is_on_calibrate = False
     return avg_click_data
 
@@ -229,11 +226,14 @@ def save_calibration_data():
             error(f"Erro ao salvar dados de calibração: {e}")
 
 def load_calibration_data():
+    global loaded_calibration_file
     try:
         name = os.path.join(calibration_path, "calibration_data.txt")
         with open(name, "r") as archive:
+            loaded_calibration_file = True
             return json.load(archive)
     except Exception as e:
+        loaded_calibration_file = False
         return {}
 
 def error(message):
@@ -247,8 +247,8 @@ def error(message):
 
 def error_face():
     error("Rastreio não identificado, alinhe seu rosto com a câmera e tente novamente.")
-    print('aiiuaa')
     face_detect()
+    # breakpoint()
 
 def alert(message):
     ctypes.windll.user32.MessageBoxW(
@@ -265,18 +265,23 @@ def calculate_width_ratio():
         # Filtrar valores fora de 1 desvio padrão
         filtered_values = [x for x in values if abs(x - mean) <= std_dev]
         return sum(filtered_values) / len(filtered_values) if filtered_values else mean
+    
+    def get(data, key):
+        # Convertendo a chave para string caso venha do json
+        key = str(key) if loaded_calibration_file else int(key)
+        return data.get(key)
 
     # Encontrar os quatro pontos mais próximos na matriz de calibração
-    col_left = robust_mean(avg_click_data[0][0], avg_click_data[1][0], avg_click_data[2][0])
-    col_right = robust_mean(avg_click_data[6][0], avg_click_data[7][0], avg_click_data[8][0])
-    row_top = robust_mean(avg_click_data[0][1], avg_click_data[3][1], avg_click_data[6][1])
-    row_bottom = robust_mean(avg_click_data[2][1], avg_click_data[5][1], avg_click_data[8][1])
+    col_left = robust_mean(get(avg_click_data, 0)[0], get(avg_click_data, 1)[0], get(avg_click_data, 2)[0])
+    col_right = robust_mean(get(avg_click_data, 6)[0], get(avg_click_data, 7)[0], get(avg_click_data, 8)[0])
+    row_top = robust_mean(get(avg_click_data, 0)[1], get(avg_click_data, 3)[1], get(avg_click_data, 6)[1])
+    row_bottom = robust_mean(get(avg_click_data, 2)[1], get(avg_click_data, 5)[1], get(avg_click_data, 8)[1])
     
     # Obter os valores de calibração para os pontos
-    top_left = avg_click_data[0]
-    top_right = avg_click_data[6]
-    bottom_left = avg_click_data[2]
-    bottom_right = avg_click_data[8]
+    # top_left = avg_click_data[0]
+    # top_right = avg_click_data[6]
+    # bottom_left = avg_click_data[2]
+    # bottom_right = avg_click_data[8]
 
     relative_total_x = col_right - col_left
     relative_total_y = row_bottom - row_top
@@ -295,8 +300,8 @@ def calculate_width_ratio():
     # Calcular os valores em pixels maiores que 0
     value_px_x = max((ratio_x_normalized - col_left) * scale_x, 10)
     value_px_y = max((ratio_y_normalized - row_top) * scale_y, 10) 
-    value_px_x = screen_w - 10 if value_px_x > screen_w else value_px_x
-    value_px_y = screen_h - 10 if value_px_y > screen_h else value_px_y
+    value_px_x = (screen_w - 80) if value_px_x >= screen_w else value_px_x
+    value_px_y = (screen_h - 30) if value_px_y >= screen_h else value_px_y
     print(value_px_x, value_px_y)
     return int(value_px_x), int(value_px_y)
 
@@ -307,6 +312,9 @@ def calculate_width_ratio():
 def main(): 
         global avg_click_data
         avg_click_data = load_calibration_data()
+        fulano = {1: 1, 2: 2}
+        print(fulano.get('1'))
+        # breakpoint()
         # Configuração da janela principal
         root = Tk()
         root.title('L.O.R.E.N.A.')
