@@ -12,9 +12,13 @@ from ui import menu
 import json
 import os
 from threading import Lock
+from statistics import median
+from collections import deque
+import math
 
 
 frame_lock = Lock()
+root = Tk()
 
 gaze = GazeTracking()
 webcam = cv2.VideoCapture(0)
@@ -34,13 +38,15 @@ is_on_calibrate = False
 tracking_thread_running = False
 tracking_thread = None
 loaded_calibration_file = False
+its_recognizing = False
 
 def play():
     global tracking_thread_running
     if avg_click_data:
         try:
+            alert('Para sair do rastreio ocular aperte ESC')
             start_mouse_tracking()
-            face_detect()
+            # face_detect()
         except Exception as e:
             error(f"Erro de rastreio: {e}")
             cv2.destroyAllWindows()
@@ -48,47 +54,54 @@ def play():
     else:
         alert("Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
 
+
 def mouse_tracking():
-    global ratio_x, ratio_y, frame, ret, is_on_calibrate
-    alert('Para sair do rastreio ocular aperte ESC')
+    global ratio_x, ratio_y, frame, ret, is_on_calibrate, tracking_thread_running
+    
+    last_three_x = deque(maxlen=5)
+    last_three_y = deque(maxlen=5)
+
     try:
-       while True:
-            with frame_lock:
-                if not tracking_thread_running:  # Verifica se a thread deve parar
-                    break
+        while tracking_thread_running:
             ret, frame = webcam.read()
-            frame = cv2.flip(frame, 1)
-            if not ret:
+            if not ret or frame is None:
                 error("Falha ao capturar imagem da webcam")
                 break
 
+            frame = cv2.flip(frame, 1)
+            frame = cv2.medianBlur(frame, 5)
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio()
 
-            # cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
-            # cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            # img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
-            # cv2.imshow('pleyou', img)
-
             if not is_on_calibrate and ratio_x is not None and ratio_y is not None:
                 coord = calculate_width_ratio()
-                pyautogui.moveTo(coord)
-                # cv2.circle(img, coord, 3, (0, 0, 255))
-                #breakpoint()
-                
-            elif avg_click_data and ratio_x is None:
-                alert('tente ficar próximo a câmera e verifique a iluminação do ambiente')
+                last_three_x.append(coord[0])
+                last_three_y.append(coord[1])
+                if len(last_three_x) == 5:
+                    coordinates = (median(last_three_x), median(last_three_y)) 
+                    pyautogui.moveTo(coordinates)
+            elif not is_on_calibrate and avg_click_data and ratio_x is None:
+                alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
 
-            time.sleep(0.2)
-            
+            img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+            cv2.putText(img, "y:  " + str(ratio_y), (90, 130), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+            cv2.putText(img, "x: " + str(ratio_x), (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+            cv2.putText(img, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
 
-            if cv2.waitKey(1) & 0xFF == 27:
-                alert("Detecção interrompida pelo usuário.")
+            cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
+            cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.imshow('pleyou', img)
+
+            if cv2.waitKey(1) & 0xFF == 27:  # Pressione 'ESC' para sair
                 break
 
+            time.sleep(0.1)
+        cv2.destroyAllWindows()
     except Exception as e:
         error(f"Erro de rastreio: {e}")
+    finally:
+        cv2.destroyAllWindows()
 
 
 def start_mouse_tracking():
@@ -105,48 +118,54 @@ def face_detect():
     start_time = None  
     detection_started = False
     
-    while True:
-        ret, frame = webcam.read()
-        if frame is None or not ret:
-            alert("Falha ao capturar imagem da webcam")
-            break
-        
-        debug_frame = frame.copy()
-        middle_cam = int(webcam.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
-
-        if ratio_x and ratio_y:
-            if not detection_started:
-                detection_started = True
-                start_time = time.time()
-
-            elapsed_time = time.time() - start_time
-
-            cv2.putText(debug_frame, f"Mantenha sua posição por {5 - int(elapsed_time)} segundos!",
-                            (20, 50),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0, 255, 0),1,cv2.LINE_AA)
-
-            if elapsed_time >= 5: 
-                alert("Detecção concluída com sucesso!")
+    try:
+        while True:
+            ret, frame = webcam.read()
+            if frame is None or not ret:
+                alert("Falha ao capturar imagem da webcam")
                 break
+            
+            debug_frame = frame.copy()
+            middle_cam = int(webcam.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
 
-        else:
-            cv2.putText( debug_frame, "Alinhe seu rosto de acordo com a marcação!", (20, 50), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
-            detection_started = False
+            if ratio_x and ratio_y:
+                if not detection_started:
+                    detection_started = True
+                    start_time = time.time()
 
-        frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
-        cv2.imshow("Deteccao", frame_mesc)
+                elapsed_time = time.time() - start_time
 
-        cv2.moveWindow('Deteccao', int(screen_w / 2 - middle_cam), 0)
+                cv2.putText(debug_frame, f"Mantenha sua posicao por {5 - int(elapsed_time)} segundos!",
+                                (20, 50),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0, 255, 0),1,cv2.LINE_AA)
 
-        # Permitir sair manualmente pressionando 'ESC'
-        if cv2.waitKey(1) & 0xFF == 27:
-            alert("Detecção interrompida pelo usuário.")
-            break
+                if elapsed_time >= 5: 
+                    alert("Detecção concluida com sucesso!")
+                    break
 
-    cv2.destroyWindow('Deteccao')
+            else:
+                cv2.putText( debug_frame, "Alinhe seu rosto de acordo com a marcação!", (20, 50), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+                detection_started = False
+
+            frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
+            cv2.imshow("Deteccao", frame_mesc)
+
+            cv2.moveWindow('Deteccao', int(screen_w / 2 - middle_cam), 0)
+
+            # Permitir sair manualmente pressionando 'ESC'
+            if cv2.waitKey(1) & 0xFF == 27:
+                alert("Detecção interrompida pelo usuário.")
+                break
+            
+            time.sleep(0.1)
+
+    finally:
+        cv2.destroyWindow("Deteccao")
+        return detection_started
+
 
 def calibrate():
-    global is_on_calibrate, tracking_thread, tracking_thread_running
+    global is_on_calibrate, tracking_thread, tracking_thread_running, root
     is_on_calibrate = True
     alert("Olhe para os pontos indicados em azul e clique com o botão esquerdo do mouse até os pontos ficarem verdes para calibrar o sistema")
     start_mouse_tracking()
@@ -154,6 +173,8 @@ def calibrate():
     colors = [(100, 100, 0) for _ in range(len(points))]
     click_data = {i: [] for i in range(len(points))}
     current_point = 0
+
+    
 
     def draw_calibration_points(img, points, colors, current_point):
         for i, (x, y) in enumerate(points):
@@ -163,12 +184,9 @@ def calibrate():
 
     def on_mouse_event(event, x, y, flags, param):
         nonlocal current_point
-        if event == cv2.EVENT_LBUTTONDOWN:
+        if event == cv2.EVENT_LBUTTONDOWN and not its_recognizing:
             if ratio_x is not None and ratio_y is not None:
-                try : 
-                    click_data[current_point].append((ratio_x, ratio_y))
-                except: 
-                    error_face()
+                click_data[current_point].append((ratio_x, ratio_y))
                 num_clicks = len(click_data[current_point])
                 if num_clicks == 1:
                     colors[current_point] = (0, 255, 255)
@@ -178,6 +196,7 @@ def calibrate():
                     current_point += 1
             else:
                 error_face()
+                # breakpoint()
 
     cv2.namedWindow('Calibracao', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Calibracao', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -188,34 +207,36 @@ def calibrate():
             img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
             draw_calibration_points(img, points, colors, current_point)
             cv2.imshow('Calibracao', img)
+            error_face() if ratio_x is None else None 
             if cv2.waitKey(1) & 0xFF == 27:
-                cv2.destroyWindow('Calibracao')
+                tracking_thread_running = False
+                is_on_calibrate = False
                 break
+            time.sleep(0.1)
     finally:
         cv2.destroyAllWindows()
 
-    global avg_click_data
-    avg_click_data = {}
+    avg_click_data= {}
     for i, clicks in click_data.items():
         if len(clicks) == 3:
             avg_x = sum(x for x, y in clicks) / 3
             avg_y = sum(y for x, y in clicks) / 3
             avg_click_data[i] = (avg_x, avg_y)
 
-    with frame_lock:
-        tracking_thread_running = False
-    tracking_thread.join()
-
-    if len(avg_click_data) == 8:
-        save_calibration_data()  
+    # breakpoint()
+    if len(avg_click_data) > 7:
+        save_calibration_data(avg_click_data)  
     else:
         alert('Erro ao calibrar!')
-        cv2.destroyAllWindows()
 
-    is_on_calibrate = False
+    tracking_thread_running = False
+    if tracking_thread:
+        tracking_thread.join()                  
+    cv2.destroyAllWindows()
     return avg_click_data
 
-def save_calibration_data():
+
+def save_calibration_data(avg_click_data):
     if avg_click_data:
         try:
             name = os.path.join(calibration_path, "calibration_data.txt")
@@ -246,8 +267,11 @@ def error(message):
     return
 
 def error_face():
+    global its_recognizing
+    its_recognizing = True
     error("Rastreio não identificado, alinhe seu rosto com a câmera e tente novamente.")
     face_detect()
+    its_recognizing = False
     # breakpoint()
 
 def alert(message):
@@ -302,7 +326,7 @@ def calculate_width_ratio():
     value_px_y = max((ratio_y_normalized - row_top) * scale_y, 10) 
     value_px_x = (screen_w - 80) if value_px_x >= screen_w else value_px_x
     value_px_y = (screen_h - 30) if value_px_y >= screen_h else value_px_y
-    print(value_px_x, value_px_y)
+    print(math.floor(value_px_x), math.floor(value_px_y))
     return int(value_px_x), int(value_px_y)
 
 
@@ -310,23 +334,19 @@ def calculate_width_ratio():
 
 
 def main(): 
-        global avg_click_data
+        global avg_click_data, tracking_thread_running, root
         avg_click_data = load_calibration_data()
         fulano = {1: 1, 2: 2}
         print(fulano.get('1'))
         # breakpoint()
         # Configuração da janela principal
-        root = Tk()
         root.title('L.O.R.E.N.A.')
-
-        screen_w = root.winfo_screenwidth()
-        screen_h = root.winfo_screenheight()
         
         # Calculando a posição para centralizar a janela
-        pos_x = (screen_w - 550) // 2
-        pos_y = (screen_h - 550) // 2
+        pos_x = screen_w  // 4
+        pos_y = screen_h  // 4
 
-        root.geometry(f'{550}x{550}+{pos_x}+{pos_y}')
+        root.geometry(f'{screen_w // 2 }x{screen_h // 2}+{pos_x}+{pos_y}')
 
         root.iconphoto(False, PhotoImage(file='ui/assets/imgs/logo.png'))
         root.configure(bg='#fff')  
@@ -367,6 +387,10 @@ def main():
         root.mainloop()
 
 def on_close(root):
+    global tracking_thread_running
+    tracking_thread_running = False
+    if tracking_thread:
+        tracking_thread.join()
     webcam.release()
     cv2.destroyAllWindows()
     root.destroy()
