@@ -73,6 +73,7 @@ def mouse_tracking():
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio()
+            is_blinking = gaze.is_blinking()
 
             if not is_on_calibrate and ratio_x is not None and ratio_y is not None:
                 coord = calculate_width_ratio()
@@ -84,14 +85,15 @@ def mouse_tracking():
             elif not is_on_calibrate and avg_click_data and ratio_x is None:
                 alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
 
-            img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
-            cv2.putText(img, "y:  " + str(ratio_y), (90, 130), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
-            cv2.putText(img, "x: " + str(ratio_x), (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
-            cv2.putText(img, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
-
-            cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
-            cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            cv2.imshow('pleyou', img)
+            # cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
+            # cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            # img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+            cv2.imshow('pleyou', frame)
+            
+            cv2.putText(frame, "ta piscando:  " + 'Sim' if is_blinking else 'Nao', (90, 130), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+            # cv2.putText(frame, "x: " + str(ratio_x), (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+            # cv2.putText(frame, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+            # cv2.imshow("Demo", frame)
 
             if cv2.waitKey(1) & 0xFF == 27:  # Pressione 'ESC' para sair
                 break
