@@ -36,9 +36,12 @@ avg_click_data = {}
 # flags states
 is_on_calibrate = False
 tracking_thread_running = False
-tracking_thread = None
 loaded_calibration_file = False
 its_recognizing = False
+tracking_thread = None
+
+# Calibration
+x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale = None, None, None, None
 
 def play():
     global tracking_thread_running
@@ -73,25 +76,30 @@ def mouse_tracking():
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio()
-            is_blinking = gaze.is_blinking()
+            click = gaze.is_left_blinking()
 
-            if not is_on_calibrate and ratio_x is not None and ratio_y is not None:
-                coord = calculate_width_ratio()
+            if not is_on_calibrate and click:
+                img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+                cv2.namedWindow('Rastreio em execucao', cv2.WINDOW_NORMAL)
+                cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+                cv2.setWindowProperty('Rastreio em execucao', cv2.WND_PROP_ASPECT_RATIO, cv2.WINDOW_KEEPRATIO)
+                cv2.imshow('Rastreio em execucao', img)
+                pyautogui.click()
+                click = False
+                continue
+
+            elif not is_on_calibrate and ratio_x is not None and ratio_y is not None:
+                coord = calculate_absolute()
                 last_three_x.append(coord[0])
                 last_three_y.append(coord[1])
                 if len(last_three_x) == 5:
                     coordinates = (median(last_three_x), median(last_three_y)) 
                     pyautogui.moveTo(coordinates)
-            elif not is_on_calibrate and avg_click_data and ratio_x is None:
+
+            elif (not is_on_calibrate and click == False) and (avg_click_data and ratio_x is None):
+                breakpoint()
                 alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
 
-            # cv2.namedWindow('pleyou', cv2.WINDOW_NORMAL)
-            # cv2.setWindowProperty('pleyou', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            # img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
-            cv2.imshow('pleyou', frame)
-            
-            cv2.putText(frame, "ta piscando:  " + 'Sim' if is_blinking else 'Nao', (90, 130), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
-            # cv2.putText(frame, "x: " + str(ratio_x), (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
             # cv2.putText(frame, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
             # cv2.imshow("Demo", frame)
 
@@ -235,29 +243,35 @@ def calibrate():
     if tracking_thread:
         tracking_thread.join()                  
     cv2.destroyAllWindows()
-    return avg_click_data
 
 
-def save_calibration_data(avg_click_data):
-    if avg_click_data:
+def save_calibration_data(data):
+    global avg_click_data
+    if data:
         try:
             name = os.path.join(calibration_path, "calibration_data.txt")
             with open(name, "w") as archive:
-                json.dump(avg_click_data, archive, indent=4)
+                json.dump(data, archive, indent=4)
             alert("Calibração salva com sucesso!")
+            avg_click_data = data
+            # breakpoint()
+            print(calculate_width_ratio())
         except Exception as e:
             error(f"Erro ao salvar dados de calibração: {e}")
 
 def load_calibration_data():
-    global loaded_calibration_file
+    global loaded_calibration_file, avg_click_data
     try:
         name = os.path.join(calibration_path, "calibration_data.txt")
         with open(name, "r") as archive:
             loaded_calibration_file = True
-            return json.load(archive)
+            avg_click_data = json.load(archive)
+            calculate_width_ratio()
+            return avg_click_data
     except Exception as e:
         loaded_calibration_file = False
-        return {}
+        avg_click_data = {}
+        return avg_click_data
 
 def error(message):
     ctypes.windll.user32.MessageBoxW(
@@ -283,6 +297,8 @@ def alert(message):
     return
 
 def calculate_width_ratio():
+
+    global x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale, avg_click_data
 
     def robust_mean(value1, value2, value3):
         values = [value1, value2, value3]
@@ -319,28 +335,33 @@ def calculate_width_ratio():
     scale_x = screen_w / relative_total_x
     scale_y = screen_h / relative_total_y
 
-    # Garantindo o range das laterais da tela
-    ratio_x_normalized = max(min(ratio_x, col_right), col_left)
-    ratio_y_normalized = max(min(ratio_y, row_bottom), row_top)
+    x_axis_limits = (col_left, col_right)
+    y_axis_limits = (row_top, row_bottom)
+    horizontal_scale = scale_x
+    vertical_scale = scale_y
+    return x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale
+
+
+
+def calculate_absolute():
+    global x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale, ratio_x, ratio_y
+     # Garantindo o range das laterais da tela
+    ratio_x_normalized = max(min(ratio_x, x_axis_limits[1]), x_axis_limits[0])
+    ratio_y_normalized = max(min(ratio_y, y_axis_limits[1]), y_axis_limits[0])
     
     # Calcular os valores em pixels maiores que 0
-    value_px_x = max((ratio_x_normalized - col_left) * scale_x, 10)
-    value_px_y = max((ratio_y_normalized - row_top) * scale_y, 10) 
-    value_px_x = (screen_w - 80) if value_px_x >= screen_w else value_px_x
-    value_px_y = (screen_h - 30) if value_px_y >= screen_h else value_px_y
+    value_px_x = max((ratio_x_normalized - x_axis_limits[0]) * horizontal_scale, 10)
+    value_px_y = max((ratio_y_normalized - y_axis_limits[0]) * vertical_scale, 10) 
+    value_px_x = (screen_w - 40) if value_px_x >= screen_w else value_px_x
+    value_px_y = (screen_h - 20) if value_px_y >= screen_h else value_px_y
     print(math.floor(value_px_x), math.floor(value_px_y))
     return int(value_px_x), int(value_px_y)
 
 
-
-
-
 def main(): 
         global avg_click_data, tracking_thread_running, root
-        avg_click_data = load_calibration_data()
-        fulano = {1: 1, 2: 2}
-        print(fulano.get('1'))
-        # breakpoint()
+        load_calibration_data()
+        
         # Configuração da janela principal
         root.title('L.O.R.E.N.A.')
         
@@ -368,8 +389,8 @@ def main():
     
         centro.pack()
 
-        Label(centro, text="Bem-vindo(a) ao LORENA,", font=('Montserrat', 16), background="#fff").pack(pady=0)
-        Label(centro, text="seu assistente virtual por eyeTracking", font=('Montserrat', 16), background="#fff").pack(pady=0)
+        Label(centro, text="Bem-vindo(a) ao LORENA,", font=('Montserrat', 14), background="#fff").pack(pady=0)
+        Label(centro, text="seu assistente virtual por eyeTracking", font=('Montserrat', 14), background="#fff").pack(pady=0)
         logo = PhotoImage(file=r'ui/assets/imgs/logo.png')
         logo = logo.subsample(5, 5)
         lb_logo = Label(topo, image=logo)
@@ -420,3 +441,6 @@ def configure_style():
 
 if __name__ == "__main__":
    main()
+
+
+
