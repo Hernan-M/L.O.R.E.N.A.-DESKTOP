@@ -20,8 +20,10 @@ import math
 frame_lock = Lock()
 root = Tk()
 
+
 gaze = GazeTracking()
-webcam = cv2.VideoCapture(0)
+
+webcam = cv2.VideoCapture(1)
 
 alert_asset = cv2.imread("ui/assets/imgs/alert.png")
 calibration_path = "settings/calibration"
@@ -59,10 +61,10 @@ def play():
 
 
 def mouse_tracking():
-    global ratio_x, ratio_y, frame, ret, is_on_calibrate, tracking_thread_running
+    global ratio_x, ratio_y, frame, ret, is_on_calibrate, tracking_thread_running, avg_click_data
     
-    last_three_x = deque(maxlen=5)
-    last_three_y = deque(maxlen=5)
+    last_three_x = deque(maxlen=3)
+    last_three_y = deque(maxlen=3)
 
     try:
         while tracking_thread_running:
@@ -76,6 +78,9 @@ def mouse_tracking():
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio()
+            if ratio_x is not None and ratio_y is not None:
+                ratio_x = ratio_x + 0.010000000 
+                ratio_y = ratio_y + 0.010000000 
             click = gaze.is_left_blinking()
 
             if not is_on_calibrate and click:
@@ -92,12 +97,12 @@ def mouse_tracking():
                 coord = calculate_absolute()
                 last_three_x.append(coord[0])
                 last_three_y.append(coord[1])
-                if len(last_three_x) == 5:
+                if len(last_three_x) == 3:
                     coordinates = (median(last_three_x), median(last_three_y)) 
                     pyautogui.moveTo(coordinates)
 
-            elif (not is_on_calibrate and click == False) and (avg_click_data and ratio_x is None):
-                breakpoint()
+            elif not is_on_calibrate and (avg_click_data and ratio_x is None):
+                face_detect()
                 alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
 
             # cv2.putText(frame, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
@@ -145,16 +150,16 @@ def face_detect():
 
                 elapsed_time = time.time() - start_time
 
-                cv2.putText(debug_frame, f"Mantenha sua posicao por {5 - int(elapsed_time)} segundos!",
-                                (20, 50),cv2.FONT_HERSHEY_SIMPLEX,0.5,(0, 255, 0),1,cv2.LINE_AA)
+                cv2.putText(debug_frame, f"Mantenha sua posicao por {5 - int(elapsed_time)} {'segundos!' if 5 - int(elapsed_time) > 1 else 'segundo!'}",
+                                (20, 80),cv2.FONT_HERSHEY_TRIPLEX,0.7,(0, 255, 0),1,cv2.LINE_AA)
 
                 if elapsed_time >= 5: 
                     alert("Detecção concluida com sucesso!")
                     break
 
             else:
-                cv2.putText( debug_frame, "Alinhe seu rosto de acordo com a marcação!", (20, 50), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText( debug_frame, "Alinhe seu rosto onde esta indicado!", (20, 80), 
+                            cv2.FONT_HERSHEY_TRIPLEX, 0.7, (0, 255, 255), 1, cv2.LINE_AA)
                 detection_started = False
 
             frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
@@ -179,34 +184,42 @@ def calibrate():
     is_on_calibrate = True
     alert("Olhe para os pontos indicados em azul e clique com o botão esquerdo do mouse até os pontos ficarem verdes para calibrar o sistema")
     start_mouse_tracking()
-    points = [(x, y) for x in [0, screen_w // 2, screen_w] for y in [0, screen_h // 2, screen_h]]
+    points = [(x, y) for x in [55, screen_w // 2, screen_w - 55] for y in [55, screen_h // 2, screen_h - 55]]
     colors = [(100, 100, 0) for _ in range(len(points))]
     click_data = {i: [] for i in range(len(points))}
     current_point = 0
-
-    
 
     def draw_calibration_points(img, points, colors, current_point):
         for i, (x, y) in enumerate(points):
             cv2.circle(img, (x, y), 50, colors[i], -1)
         if current_point < len(points):
+            elapsed_time = time.time() - start_time
+            remaining_time = max(0, 3 - int(elapsed_time))
             cv2.circle(img, points[current_point], 50, (200, 100, 0), 10)
-
-    def on_mouse_event(event, x, y, flags, param):
-        nonlocal current_point
-        if event == cv2.EVENT_LBUTTONDOWN and not its_recognizing:
-            if ratio_x is not None and ratio_y is not None:
-                click_data[current_point].append((ratio_x, ratio_y))
-                num_clicks = len(click_data[current_point])
-                if num_clicks == 1:
-                    colors[current_point] = (0, 255, 255)
-                elif num_clicks == 2:
-                    colors[current_point] = (0, 255, 0)
-                elif num_clicks == 3:
-                    current_point += 1
+            if remaining_time > 0:
+                cv2.putText(img, f"{remaining_time}", (points[current_point][0] - 10, points[current_point][1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 200), 2)
             else:
-                error_face()
-                # breakpoint()
+                cv2.putText(img, "Pronto", (points[current_point][0] - 32, points[current_point][1] + 5), cv2.FONT_HERSHEY_TRIPLEX, 0.6, (255, 255, 255), 2)
+
+    def on_mouse_event(event, x = 0, y = 0, flags = '', param = ''):
+        nonlocal current_point, start_time
+        if event == cv2.EVENT_LBUTTONDOWN and not its_recognizing:
+            elapsed_time = time.time() - start_time
+            remaining_time = max(0, 3 - int(elapsed_time))
+            if remaining_time == 0:  # Permitir clique somente após o tempo acabar
+                if ratio_x is not None and ratio_y is not None:
+                    click_data[current_point].append((ratio_x, ratio_y))
+                    num_clicks = len(click_data[current_point])
+                    if num_clicks == 1:
+                        colors[current_point] = (0, 255, 255)
+                    elif num_clicks == 2:
+                        colors[current_point] = (0, 255, 0)
+                    elif num_clicks == 3:
+                        current_point += 1
+                        if current_point < len(points):
+                            start_time = time.time()
+                else:
+                    error_face()
 
     cv2.namedWindow('Calibracao', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Calibracao', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
@@ -215,9 +228,16 @@ def calibrate():
     try:
         while current_point < len(points):
             img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+            if current_point < len(points):
+                start_time = time.time() if 'start_time' not in locals() else start_time
             draw_calibration_points(img, points, colors, current_point)
+            cv2.putText(img, "Olhe para o ponto indicado, e clique apos a contagem para registrar o rastreio!", (int(screen_w / 6), int(screen_h/4)), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 0, 0), 1)
             cv2.imshow('Calibracao', img)
-            error_face() if ratio_x is None else None 
+            error_face() if ratio_x is None else None
+            #permite usar tecla enter para calibrar
+            if cv2.waitKey(1) & 0xFF == 13:
+                on_mouse_event(cv2.EVENT_LBUTTONDOWN)
+                
             if cv2.waitKey(1) & 0xFF == 27:
                 tracking_thread_running = False
                 is_on_calibrate = False
@@ -226,24 +246,23 @@ def calibrate():
     finally:
         cv2.destroyAllWindows()
 
-    avg_click_data= {}
+    avg_click_data = {}
     for i, clicks in click_data.items():
         if len(clicks) == 3:
             avg_x = sum(x for x, y in clicks) / 3
             avg_y = sum(y for x, y in clicks) / 3
             avg_click_data[i] = (avg_x, avg_y)
 
-    # breakpoint()
     if len(avg_click_data) > 7:
-        save_calibration_data(avg_click_data)  
+        print(avg_click_data)
+        save_calibration_data(avg_click_data)
     else:
         alert('Erro ao calibrar!')
 
     tracking_thread_running = False
     if tracking_thread:
-        tracking_thread.join()                  
+        tracking_thread.join()
     cv2.destroyAllWindows()
-
 
 def save_calibration_data(data):
     global avg_click_data
@@ -254,8 +273,8 @@ def save_calibration_data(data):
                 json.dump(data, archive, indent=4)
             alert("Calibração salva com sucesso!")
             avg_click_data = data
-            # breakpoint()
-            print(calculate_width_ratio())
+            breakpoint()
+            calculate_width_ratio(avg_click_data)
         except Exception as e:
             error(f"Erro ao salvar dados de calibração: {e}")
 
@@ -266,7 +285,7 @@ def load_calibration_data():
         with open(name, "r") as archive:
             loaded_calibration_file = True
             avg_click_data = json.load(archive)
-            calculate_width_ratio()
+            calculate_width_ratio(avg_click_data)
             return avg_click_data
     except Exception as e:
         loaded_calibration_file = False
@@ -296,9 +315,9 @@ def alert(message):
     )
     return
 
-def calculate_width_ratio():
+def calculate_width_ratio(avg_click_data):
 
-    global x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale, avg_click_data
+    global x_axis_limits, y_axis_limits, horizontal_scale, vertical_scale
 
     def robust_mean(value1, value2, value3):
         values = [value1, value2, value3]
@@ -359,55 +378,55 @@ def calculate_absolute():
 
 
 def main(): 
-        global avg_click_data, tracking_thread_running, root
-        load_calibration_data()
-        
-        # Configuração da janela principal
-        root.title('L.O.R.E.N.A.')
-        
-        # Calculando a posição para centralizar a janela
-        pos_x = screen_w  // 4
-        pos_y = screen_h  // 4
-
-        root.geometry(f'{screen_w // 2 }x{screen_h // 2}+{pos_x}+{pos_y}')
-
-        root.iconphoto(False, PhotoImage(file='ui/assets/imgs/logo.png'))
-        root.configure(bg='#fff')  
-
-        configure_style()      
-
-        # Frame principal
-        borda = Frame(root, style='Borda.TFrame')
-        borda.pack(fill='x', expand=True)
-
-        # Topo com logo
-        topo = Frame(borda)
-        topo.pack(pady=20)
-
-        # Centro com título
-        centro = Frame(borda)
+    global avg_click_data, tracking_thread_running, root, loaded_calibration_file
     
-        centro.pack()
+    # Configuração da janela principal
+    root.title('L.O.R.E.N.A.')
+    if loaded_calibration_file == False: 
+        load_calibration_data()
+    
+    # Calculando a posição para centralizar a janela
+    pos_x = screen_w  // 4
+    pos_y = screen_h  // 4
 
-        Label(centro, text="Bem-vindo(a) ao LORENA,", font=('Montserrat', 14), background="#fff").pack(pady=0)
-        Label(centro, text="seu assistente virtual por eyeTracking", font=('Montserrat', 14), background="#fff").pack(pady=0)
-        logo = PhotoImage(file=r'ui/assets/imgs/logo.png')
-        logo = logo.subsample(5, 5)
-        lb_logo = Label(topo, image=logo)
-        lb_logo.image = logo
-        lb_logo.pack()
+    root.geometry(f'{screen_w // 2 }x{screen_h // 2}+{pos_x}+{pos_y}')
 
-        Label(centro, text="Escolha uma opção:", font=('Montserrat', 16), background="#fff").pack(pady=10)
+    root.iconphoto(False, PhotoImage(file='ui/assets/imgs/logo.png'))
+    root.configure(bg='#0b1f30')  # Alterar a cor de fundo para #0b1f30
 
-        # Base com botões
-        base = Frame(borda)
-        base.pack()
+    configure_style()      
 
-        Button(base, text='Play', command=play, cursor='hand1').pack(fill='x', pady=(0, 10))
-        Button(base, text='Calibrar', command=calibrate, cursor='hand1').pack(fill='x', pady=(0, 10))
+    # Frame principal
+    borda = Frame(root, style='Borda.TFrame')
+    borda.pack(fill='x', expand=True)
 
-        root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
-        root.mainloop()
+    # Topo com logo
+    topo = Frame(borda)
+    topo.pack(pady=20)
+
+    # Centro com título
+    centro = Frame(borda)
+    centro.pack()
+
+    Label(centro, text="Bem-vindo(a) ao LORENA,", font=('Montserrat', 14), background="#0b1f30", foreground="#fff").pack(pady=0)
+    Label(centro, text="seu assistente virtual por eyeTracking", font=('Montserrat', 14), background="#0b1f30", foreground="#fff").pack(pady=0)
+    logo = PhotoImage(file=r'ui/assets/imgs/logo.png')
+    logo = logo.subsample(5, 5)
+    lb_logo = Label(topo, image=logo, border=0, background="#0b1f30")
+    lb_logo.image = logo
+    lb_logo.pack()
+
+    Label(centro, text="Escolha uma opção:", font=('Montserrat', 14), background="#0b1f30", foreground="#fff").pack(pady=10)
+
+    # Base com botões
+    base = Frame(borda)
+    base.pack()
+
+    Button(base, text='Play', command=play, cursor='hand1').grid(row=0, column=0, padx=10, pady=10)
+    Button(base, text='Calibrar', command=calibrate, cursor='hand1').grid(row=0, column=1, padx=10, pady=10)
+
+    root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
+    root.mainloop()
 
 def on_close(root):
     global tracking_thread_running
@@ -418,25 +437,23 @@ def on_close(root):
     cv2.destroyAllWindows()
     root.destroy()
 
-
-
 def configure_style():
-            # Estilos
-            style = Style()
-            style.theme_use('default')
-            style.configure('TFrame', background='#fff')
-            style.configure('Borda.TFrame', width=300)
-            style.configure('TLabel', justify='center', font=('Montserrat', 10), background='#fff', foreground='#808080')
-            style.configure('TButton', padding=(60, 7), font=('Montserrat', 12, 'bold'), foreground='#fff', background='#20bcbb', relief='flat')
-            style.configure('TSeparator', background='#bafafa')
+    # Estilos
+    style = Style()
+    style.theme_use('clam')
+    style.configure('TFrame', background='#0b1f30')
+    style.configure('Borda.TFrame', width=500, justify='row')
+    style.configure('TLabel', justify='center', font=('Montserrat', 10), background='#0b1f30', foreground='#fff')
+    style.configure('TButton', padding=(60, 15), font=('Montserrat', 12, 'bold'), foreground='#fff', background='#20bcbb', relief='flat')
+    style.configure('TSeparator', background='#0b1f30')
 
-            # Map de interações dos botões
-            style.map('TButton',
-                    foreground=[('pressed', '#e25ca5'), ('active', '#fff')],
-                    background=[('pressed', '!focus', '#3f8efc'), ('active', '#025b5a')])
+    # Map de interações dos botões
+    style.map('TButton',
+              foreground=[('pressed', '#e25ca5'), ('active', '#fff')],
+              background=[('pressed', '!focus', '#3f8efc'), ('active', '#025b5a')])
 
-            style.configure('TLabel', font=('Montserrat', 14), background='#fff')
-            style.configure('TButton', font=('Montserrat', 12, 'bold'))
+    style.configure('TLabel', font=('Montserrat', 14), background='#0b1f30', foreground='#fff')
+    style.configure('TButton', font=('Montserrat', 12, 'bold'))
 
 
 if __name__ == "__main__":
