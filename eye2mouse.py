@@ -1,6 +1,6 @@
 import cv2
 from gaze_tracking import GazeTracking
-import pyautogui
+import pyautogui 
 import numpy as np
 import tkinter as tk
 from tkinter import Tk, PhotoImage
@@ -67,14 +67,17 @@ def mouse_tracking():
     last_three_y = deque(maxlen=3)
 
     try:
+        timer = 0   
+        counter = 0
+        detection_started = False
         while tracking_thread_running:
+            
             ret, frame = webcam.read()
             if not ret or frame is None:
                 error("Falha ao capturar imagem da webcam")
                 break
 
-            frame = cv2.flip(frame, 1)
-            frame = cv2.medianBlur(frame, 5)
+            frame = cv2.flip(frame, 1)  
             gaze.refresh(frame)
             ratio_x = gaze.horizontal_ratio()
             ratio_y = gaze.vertical_ratio()
@@ -102,16 +105,23 @@ def mouse_tracking():
                     pyautogui.moveTo(coordinates)
 
             elif not is_on_calibrate and (avg_click_data and ratio_x is None):
-                face_detect()
-                alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
-
+                # face_detect()
+                if not detection_started:
+                    detection_started = True
+                    start_time = time.time()
+            
+                elapsed_time = time.time() - start_time
+                if elapsed_time >= 1.5: 
+                    alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
+                    
+                detection_started = False
             # cv2.putText(frame, "px: " + str(coord), (90, 200), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
             # cv2.imshow("Demo", frame)
 
             if cv2.waitKey(1) & 0xFF == 27:  # Pressione 'ESC' para sair
                 break
 
-            time.sleep(0.1)
+            time.sleep(0.05)
         cv2.destroyAllWindows()
     except Exception as e:
         error(f"Erro de rastreio: {e}")
@@ -231,7 +241,7 @@ def calibrate():
             if current_point < len(points):
                 start_time = time.time() if 'start_time' not in locals() else start_time
             draw_calibration_points(img, points, colors, current_point)
-            cv2.putText(img, "Olhe para o ponto indicado, e clique apos a contagem para registrar o rastreio!", (int(screen_w / 6), int(screen_h/4)), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 0, 0), 1)
+            cv2.putText(img, "Olhe para o ponto indicado, e clique apos a contagem para registrar o rastreio!", (int(250), int(screen_h/4)), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 0, 0), 1)
             cv2.imshow('Calibracao', img)
             error_face() if ratio_x is None else None
             #permite usar tecla enter para calibrar
@@ -273,7 +283,7 @@ def save_calibration_data(data):
                 json.dump(data, archive, indent=4)
             alert("Calibração salva com sucesso!")
             avg_click_data = data
-            breakpoint()
+            # breakpoint()
             calculate_width_ratio(avg_click_data)
         except Exception as e:
             error(f"Erro ao salvar dados de calibração: {e}")
@@ -285,6 +295,7 @@ def load_calibration_data():
         with open(name, "r") as archive:
             loaded_calibration_file = True
             avg_click_data = json.load(archive)
+            
             calculate_width_ratio(avg_click_data)
             return avg_click_data
     except Exception as e:

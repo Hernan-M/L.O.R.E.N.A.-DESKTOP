@@ -19,7 +19,7 @@ class Eye(object):
         self.center = None
         self.pupil = None
         self.landmark_points = None
-
+        # breakpoint()
         self._analyze(original_frame, landmarks, side, calibration)
 
     @staticmethod
@@ -30,8 +30,8 @@ class Eye(object):
             p1 (dlib.point): First point
             p2 (dlib.point): Second point
         """
-        x = int((p1.x + p2.x) / 2)
-        y = int((p1.y + p2.y) / 2)
+        x = int((p1[0] + p2[0]) / 2)
+        y = int((p1[1] + p2[1]) / 2)
         return (x, y)
 
     def _isolate(self, frame, landmarks, points):
@@ -42,7 +42,8 @@ class Eye(object):
             landmarks (dlib.full_object_detection): Facial landmarks for the face region
             points (list): Points of an eye (from the 68 Multi-PIE landmarks)
         """
-        region = np.array([(landmarks.part(point).x, landmarks.part(point).y) for point in points])
+        region = np.array([(landmarks[point][0], landmarks[point][1]) for point in points])
+        # breakpoint()
         region = region.astype(np.int32)
         self.landmark_points = region
 
@@ -52,6 +53,7 @@ class Eye(object):
         mask = np.full((height, width), 255, np.uint8)
         cv2.fillPoly(mask, [region], (0, 0, 0))
         eye = cv2.bitwise_not(black_frame, frame.copy(), mask=mask)
+        
 
         # Cropping on the eye
         margin = 5
@@ -77,10 +79,10 @@ class Eye(object):
         Returns:
             The computed ratio
         """
-        left = (landmarks.part(points[0]).x, landmarks.part(points[0]).y)
-        right = (landmarks.part(points[3]).x, landmarks.part(points[3]).y)
-        top = self._middle_point(landmarks.part(points[1]), landmarks.part(points[2]))
-        bottom = self._middle_point(landmarks.part(points[5]), landmarks.part(points[4]))
+        left = (landmarks[points][0][0], landmarks[points][0][1])
+        right = (landmarks[points][3][0], landmarks[points][3][1])
+        top = self._middle_point(landmarks[points][1], landmarks[points][2])
+        bottom = self._middle_point(landmarks[points][5], landmarks[points][4])
 
         eye_width = math.hypot((left[0] - right[0]), (left[1] - right[1]))
         eye_height = math.hypot((top[0] - bottom[0]), (top[1] - bottom[1]))
@@ -111,9 +113,11 @@ class Eye(object):
 
         self.blinking = self._blinking_ratio(landmarks, points)
         self._isolate(original_frame, landmarks, points)
+        # breakpoint()
 
         if not calibration.is_complete():
             calibration.evaluate(self.frame, side)
 
         threshold = calibration.threshold(side)
+        
         self.pupil = Pupil(self.frame, threshold)

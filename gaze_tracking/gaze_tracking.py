@@ -1,9 +1,27 @@
 from __future__ import division
 import os
 import cv2
+import mediapipe as mp
+from mediapipe import solutions
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import dlib
+import pyautogui
+import numpy as np
 from .eye import Eye
 from .calibration import Calibration
+from mediapipe2dlib.mp2dlib import convert_landmarks_mediapipe_to_dlib
+
+
+global face_mesh, mp_face_mesh
+
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1, min_detection_confidence=0.5)
+
+
+# landmark_points_68 = [162,234,93,58,172,136,149,148,152,377,378,365,397,288,323,454,389,71,63,105,66,107,336,
+#                   296,334,293,301,168,197,5,4,75,97,2,326,305,33,160,158,133,153,144,362,385,387,263,373,
+#                   380,61,39,37,0,267,269,291,405,314,17,84,181,78,82,13,312,308,317,14,87]
 
 
 class GazeTracking(object):
@@ -20,12 +38,12 @@ class GazeTracking(object):
         self.calibration = Calibration()
 
         # _face_detector is used to detect faces
-        self._face_detector = dlib.get_frontal_face_detector()
+            # self._face_detector = dlib.get_frontal_face_detector()
 
         # _predictor is used to get facial landmarks of a given face
-        cwd = os.path.abspath(os.path.dirname(__file__))
-        model_path = os.path.abspath(os.path.join(cwd, "trained_models/shape_predictor_68_face_landmarks.dat"))
-        self._predictor = dlib.shape_predictor(model_path)
+            # cwd = os.path.abspath(os.path.dirname(__file__))
+            # model_path = os.path.abspath(os.path.join(cwd, "trained_models/shape_predictor_68_face_landmarks.dat"))
+            # self._predictor = dlib.shape_predictor(model_path)
 
     @property
     def pupils_located(self):
@@ -42,14 +60,28 @@ class GazeTracking(object):
     def _analyze(self):
         """Detects the face and initialize Eye objects"""
         frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-        faces = self._face_detector(frame)
+        frame_rgb = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
+        # results = face_mesh.process(frame_rgb)
+        # lmks_mp = face_mesh.process(frame_rgb)
+        results = face_mesh.process(frame_rgb)
+        frame_h, frame_w, _ = self.frame.shape
 
-        try:
-            landmarks = self._predictor(frame, faces[0])
-            self.eye_left = Eye(frame, landmarks, 0, self.calibration)
-            self.eye_right = Eye(frame, landmarks, 1, self.calibration)
+        # faces = self._face_detector(frame)
 
-        except IndexError:
+        if results.multi_face_landmarks:
+            try:
+                landmarks_mp = results.multi_face_landmarks[0].landmark  # Pegando a primeira face
+                landmarks_np = np.array([[p.x * frame_w, p.y * frame_h] for p in landmarks_mp])
+                landmarks_dlib = convert_landmarks_mediapipe_to_dlib(landmarks_np)
+                # breakpoint()
+                self.eye_left = Eye(frame, landmarks_dlib, 0, self.calibration)
+                self.eye_right = Eye(frame, landmarks_dlib, 1, self.calibration)
+
+            except Exception as e:
+                self.eye_left = None
+                self.eye_right = None
+
+        else:
             self.eye_left = None
             self.eye_right = None
 
@@ -67,6 +99,7 @@ class GazeTracking(object):
         if self.pupils_located:
             x = self.eye_left.origin[0] + self.eye_left.pupil.x
             y = self.eye_left.origin[1] + self.eye_left.pupil.y
+            # breakpoint()
             return (x, y)
 
     def pupil_right_coords(self):
@@ -96,26 +129,26 @@ class GazeTracking(object):
             pupil_right = self.eye_right.pupil.y / (self.eye_right.center[1] * 2 - 10)
             return (pupil_left + pupil_right) / 2
 
-    def is_right(self):
-        """Returns true if the user is looking to the right"""
-        if self.pupils_located:
-            return self.horizontal_ratio() <= 0.35
+    # def is_right(self):
+    #     """Returns true if the user is looking to the right"""
+    #     if self.pupils_located:
+    #         return self.horizontal_ratio() <= 0.35
 
-    def is_left(self):
-        """Returns true if the user is looking to the left"""
-        if self.pupils_located:
-            return self.horizontal_ratio() >= 0.65
+    # def is_left(self):
+    #     """Returns true if the user is looking to the left"""
+    #     if self.pupils_located:
+    #         return self.horizontal_ratio() >= 0.65
 
-    def is_center(self):
-        """Returns true if the user is looking to the center"""
-        if self.pupils_located:
-            return self.is_right() is not True and self.is_left() is not True
+    # def is_center(self):
+    #     """Returns true if the user is looking to the center"""
+    #     if self.pupils_located:
+    #         return self.is_right() is not True and self.is_left() is not True
 
-    def is_blinking(self):
-        """Returns true if the user closes his eyes"""
-        if self.pupils_located:
-            blinking_ratio = (self.eye_left.blinking + self.eye_right.blinking) / 2
-            return blinking_ratio > 4.8
+    # def is_blinking(self):
+    #     """Returns true if the user closes his eyes"""
+    #     if self.pupils_located:
+    #         blinking_ratio = (self.eye_left.blinking + self.eye_right.blinking) / 2
+    #         return blinking_ratio > 4.8
         
     def is_left_blinking(self):
         """Returns true if the user closes his left eye"""
@@ -123,16 +156,16 @@ class GazeTracking(object):
             blinking_ratio = self.eye_left.blinking
             return blinking_ratio > 4.8
 
-    def is_right_blinking(self):
-        """Returns true if the user closes his right eye"""
-        if self.pupils_located:
-            blinking_ratio = self.eye_right.blinking
-            return blinking_ratio > 4.8
+    # def is_right_blinking(self):
+    #     """Returns true if the user closes his right eye"""
+    #     if self.pupils_located:
+    #         blinking_ratio = self.eye_right.blinking
+    #         return blinking_ratio > 4.8
 
 
     def annotated_frame(self):
         """Returns the main frame with pupils highlighted"""
-        frame = self.frame.copy()
+        frame = self.frame
 
         if self.pupils_located:
             color = (0, 255, 0)
