@@ -89,7 +89,7 @@ def mouse_tracking():
             if not is_on_calibrate and click:
                 img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
                 cv2.namedWindow('Rastreio em execucao', cv2.WINDOW_NORMAL)
-                cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1)
+                cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1.5)
                 cv2.setWindowProperty('Rastreio em execucao', cv2.WND_PROP_ASPECT_RATIO, cv2.WINDOW_KEEPRATIO)
                 cv2.imshow('Rastreio em execucao', img)
                 pyautogui.click()
@@ -111,7 +111,7 @@ def mouse_tracking():
                     start_time = time.time()
             
                 elapsed_time = time.time() - start_time
-                if elapsed_time >= 1.5: 
+                if elapsed_time >= 2: 
                     alert('Tente ficar próximo à câmera e verifique a iluminação do ambiente')
                     
                 detection_started = False
@@ -151,7 +151,7 @@ def face_detect():
                 break
             
             debug_frame = frame.copy()
-            middle_cam = int(webcam.get(cv2.CAP_PROP_FRAME_WIDTH) / 2)
+            cam_w = webcam.get(cv2.CAP_PROP_FRAME_WIDTH)
 
             if ratio_x and ratio_y:
                 if not detection_started:
@@ -159,23 +159,23 @@ def face_detect():
                     start_time = time.time()
 
                 elapsed_time = time.time() - start_time
+                text= f"Mantenha sua posicao por {5 - int(elapsed_time)} {'segundos!' if 2 - int(elapsed_time) > 1 else 'segundo!'}"
+                color_txt = (0, 255, 0)
 
-                cv2.putText(debug_frame, f"Mantenha sua posicao por {5 - int(elapsed_time)} {'segundos!' if 5 - int(elapsed_time) > 1 else 'segundo!'}",
-                                (20, 80),cv2.FONT_HERSHEY_TRIPLEX,0.7,(0, 255, 0),1,cv2.LINE_AA)
-
-                if elapsed_time >= 5: 
+                if elapsed_time >= 2: 
                     alert("Detecção concluida com sucesso!")
                     break
 
             else:
-                cv2.putText( debug_frame, "Alinhe seu rosto onde esta indicado!", (20, 80), 
-                            cv2.FONT_HERSHEY_TRIPLEX, 0.7, (0, 255, 255), 1, cv2.LINE_AA)
+                text = "Alinhe seu rosto onde esta indicado!"
+                color_txt = (0, 220, 200)
                 detection_started = False
 
+            cv2.putText(debug_frame, text, (getCenterText(text, cam_w, 0.7, 1), 80),cv2.FONT_HERSHEY_TRIPLEX,0.7, color_txt ,1,cv2.LINE_AA)
             frame_mesc = cv2.addWeighted(alert_asset, 0.5, debug_frame, 0.7, 0)    
             cv2.imshow("Deteccao", frame_mesc)
 
-            cv2.moveWindow('Deteccao', int(screen_w / 2 - middle_cam), 0)
+            cv2.moveWindow('Deteccao', int((screen_w - cam_w) / 2), 0)
 
             # Permitir sair manualmente pressionando 'ESC'
             if cv2.waitKey(1) & 0xFF == 27:
@@ -188,6 +188,10 @@ def face_detect():
         cv2.destroyWindow("Deteccao")
         return detection_started
 
+def getCenterText(text, window_width = screen_w, size = 1, thickness = 2):
+        (text_w, text_h), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_TRIPLEX, size, thickness)
+        text_center = (window_width - text_w) // 2
+        return int(text_center)
 
 def calibrate():
     global is_on_calibrate, tracking_thread, tracking_thread_running, root
@@ -207,9 +211,9 @@ def calibrate():
             remaining_time = max(0, 3 - int(elapsed_time))
             cv2.circle(img, points[current_point], 50, (200, 100, 0), 10)
             if remaining_time > 0:
-                cv2.putText(img, f"{remaining_time}", (points[current_point][0] - 10, points[current_point][1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 200), 2)
+                cv2.putText(img, f"{remaining_time}", (points[current_point][0] - 10, points[current_point][1] + 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 200), 2)
             else:
-                cv2.putText(img, "Pronto", (points[current_point][0] - 32, points[current_point][1] + 5), cv2.FONT_HERSHEY_TRIPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(img, "Pronto", (points[current_point][0] - 32, points[current_point][1] + 5), cv2.FONT_HERSHEY_TRIPLEX, 0.6, (222, 222, 222), 2)
 
     def on_mouse_event(event, x = 0, y = 0, flags = '', param = ''):
         nonlocal current_point, start_time
@@ -221,9 +225,9 @@ def calibrate():
                     click_data[current_point].append((ratio_x, ratio_y))
                     num_clicks = len(click_data[current_point])
                     if num_clicks == 1:
-                        colors[current_point] = (0, 255, 255)
+                        colors[current_point] = (0, 180, 200)
                     elif num_clicks == 2:
-                        colors[current_point] = (0, 255, 0)
+                        colors[current_point] = (100, 200, 0)
                     elif num_clicks == 3:
                         current_point += 1
                         if current_point < len(points):
@@ -231,30 +235,42 @@ def calibrate():
                 else:
                     error_face()
 
+    
+        
     cv2.namedWindow('Calibracao', cv2.WINDOW_NORMAL)
     cv2.setWindowProperty('Calibracao', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback('Calibracao', on_mouse_event)
 
     try:
         while current_point < len(points):
+            if cv2.waitKey(1) & 0xFF == 27:
+                tracking_thread_running = False
+                is_on_calibrate = False
+                cv2.destroyAllWindows()
+                break
+
             img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
             if current_point < len(points):
                 start_time = time.time() if 'start_time' not in locals() else start_time
             draw_calibration_points(img, points, colors, current_point)
-            cv2.putText(img, "Olhe para o ponto indicado, e clique apos a contagem para registrar o rastreio!", (int(250), int(screen_h/4)), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 0, 0), 1)
+            text_info = "Olhe para o ponto indicado, e clique com ENTER apos a contagem para registrar o rastreio!"
+            if ratio_x is None:
+                text= "Erro na identificacao, alinhe seu rosto com a camera"
+                color_txt = (0, 0, 200)
+            else:
+                text= "Rosto identificado, pronto para calibragem!"
+                color_txt = (100, 200, 0)
+            cv2.putText(img, text_info, (getCenterText(text_info), int(screen_h/4)), cv2.FONT_HERSHEY_TRIPLEX, 1, (0, 0, 0), 2)
+            cv2.putText(img, text, (getCenterText(text), int(screen_h/1.5)), cv2.FONT_HERSHEY_TRIPLEX, 1, color_txt, 2)    
             cv2.imshow('Calibracao', img)
-            error_face() if ratio_x is None else None
             #permite usar tecla enter para calibrar
             if cv2.waitKey(1) & 0xFF == 13:
                 on_mouse_event(cv2.EVENT_LBUTTONDOWN)
-                
-            if cv2.waitKey(1) & 0xFF == 27:
-                tracking_thread_running = False
-                is_on_calibrate = False
-                break
+            
             time.sleep(0.1)
     finally:
-        cv2.destroyAllWindows()
+        if is_on_calibrate:
+            cv2.destroyAllWindows()
 
     avg_click_data = {}
     for i, clicks in click_data.items():
@@ -269,22 +285,24 @@ def calibrate():
     else:
         alert('Erro ao calibrar!')
 
-    tracking_thread_running = False
-    if tracking_thread:
-        tracking_thread.join()
+    with frame_lock:
+        tracking_thread_running = False
+        if tracking_thread:
+            tracking_thread.join()
     cv2.destroyAllWindows()
 
 def save_calibration_data(data):
-    global avg_click_data
+    global avg_click_data, loaded_calibration_file
     if data:
         try:
             name = os.path.join(calibration_path, "calibration_data.txt")
             with open(name, "w") as archive:
                 json.dump(data, archive, indent=4)
-            alert("Calibração salva com sucesso!")
             avg_click_data = data
             # breakpoint()
+            loaded_calibration_file = False
             calculate_width_ratio(avg_click_data)
+            alert("Calibração salva com sucesso!")
         except Exception as e:
             error(f"Erro ao salvar dados de calibração: {e}")
 
@@ -336,6 +354,7 @@ def calculate_width_ratio(avg_click_data):
         std_dev = (sum((x - mean) ** 2 for x in values) / 3) ** 0.5       
         # Filtrar valores fora de 1 desvio padrão
         filtered_values = [x for x in values if abs(x - mean) <= std_dev]
+        # breakpoint()
         return sum(filtered_values) / len(filtered_values) if filtered_values else mean
     
     def get(data, key):
@@ -349,6 +368,8 @@ def calculate_width_ratio(avg_click_data):
     row_top = robust_mean(get(avg_click_data, 0)[1], get(avg_click_data, 3)[1], get(avg_click_data, 6)[1])
     row_bottom = robust_mean(get(avg_click_data, 2)[1], get(avg_click_data, 5)[1], get(avg_click_data, 8)[1])
     
+    # breakpoint()
+
     # Obter os valores de calibração para os pontos
     # top_left = avg_click_data[0]
     # top_right = avg_click_data[6]
