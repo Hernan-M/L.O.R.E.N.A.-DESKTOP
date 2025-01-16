@@ -89,7 +89,7 @@ def mouse_tracking():
             if not is_on_calibrate and click:
                 img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
                 cv2.namedWindow('Rastreio em execucao', cv2.WINDOW_NORMAL)
-                cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 0.9, (147, 58, 31), 1.5)
+                cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 1.5, (147, 58, 31), 2)
                 cv2.setWindowProperty('Rastreio em execucao', cv2.WND_PROP_ASPECT_RATIO, cv2.WINDOW_KEEPRATIO)
                 cv2.imshow('Rastreio em execucao', img)
                 pyautogui.click()
@@ -454,8 +454,17 @@ def main():
     base = Frame(borda)
     base.pack()
 
-    Button(base, text='Play', command=play, cursor='hand1').grid(row=0, column=0, padx=10, pady=10)
-    Button(base, text='Calibrar', command=calibrate, cursor='hand1').grid(row=0, column=1, padx=10, pady=10)
+    btn_play = Button(base, text='Play', command=play, cursor='hand1', takefocus=True)
+    btn_play.grid(row=0, column=0, padx=10, pady=10)
+
+    btn_calibrate = Button(base, text='Calibrar', command=calibrate, cursor='hand1', takefocus=True)
+    btn_calibrate.grid(row=0, column=1, padx=10, pady=10)
+
+    # Configura o foco inicial no botão "Play"
+    # root.after(100, lambda: btn_play.focus_set())
+
+    # Vincula Enter ao botão em foco
+    root.bind('<Return>', lambda event: root.focus_get().invoke())
 
     root.protocol("WM_DELETE_WINDOW", lambda: on_close(root))
     root.mainloop()
