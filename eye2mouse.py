@@ -23,7 +23,7 @@ root = Tk()
 
 gaze = GazeTracking()
 
-webcam = cv2.VideoCapture(1)
+webcam = cv2.VideoCapture(0)
 
 alert_asset = cv2.imread("ui/assets/imgs/alert.png")
 calibration_path = "settings/calibration"
@@ -88,9 +88,10 @@ def mouse_tracking():
 
             if not is_on_calibrate and click:
                 img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
+                img = cv2.imread("ui/assets/imgs/alert.png")
                 cv2.namedWindow('Rastreio em execucao', cv2.WINDOW_NORMAL)
                 cv2.putText(img, "Rastreio em execucao, pressione ESC para finalizar", (90, 165), cv2.FONT_HERSHEY_DUPLEX, 1.5, (147, 58, 31), 2)
-                cv2.setWindowProperty('Rastreio em execucao', cv2.WND_PROP_ASPECT_RATIO, cv2.WINDOW_KEEPRATIO)
+                cv2.setWindowProperty('Rastreio em execucao', cv2.WINDOW_FULLSCREEN, cv2.WINDOW_KEEPRATIO)
                 cv2.imshow('Rastreio em execucao', img)
                 pyautogui.click()
                 click = False
@@ -243,11 +244,6 @@ def calibrate():
 
     try:
         while current_point < len(points):
-            if cv2.waitKey(1) & 0xFF == 27:
-                tracking_thread_running = False
-                is_on_calibrate = False
-                cv2.destroyAllWindows()
-                break
 
             img = np.ones((screen_h, screen_w, 3), np.uint8) * 255
             if current_point < len(points):
@@ -267,6 +263,12 @@ def calibrate():
             if cv2.waitKey(1) & 0xFF == 13:
                 on_mouse_event(cv2.EVENT_LBUTTONDOWN)
             
+            if cv2.waitKey(1) & 0xFF == 27:
+                tracking_thread_running = False
+                is_on_calibrate = False
+                cv2.destroyAllWindows()
+                break
+
             time.sleep(0.1)
     finally:
         if is_on_calibrate:
