@@ -25,4 +25,19 @@ def apply(style: Style | None = None) -> Style:
         foreground=[("pressed", PINK), ("active", FG)],
         background=[("pressed", "!focus", ACCENT_PRESSED), ("active", ACCENT_ACTIVE)],
     )
+    style.configure(
+        "TCombobox",
+        fieldbackground="#132f4c",
+        background=ACCENT,
+        foreground=FG,
+        arrowcolor=FG,
+        font=(FONT, 10),
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", "#132f4c"), ("disabled", "#081622")],
+        foreground=[("disabled", "#5a6e85"), ("readonly", FG)],
+        selectbackground=[("readonly", ACCENT_ACTIVE)],
+        selectforeground=[("readonly", FG)],
+    )
     return style

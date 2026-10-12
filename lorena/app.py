@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import logging
-import tkinter as tk
 from logging.handlers import RotatingFileHandler
+
+from lorena.infra.platform import configure_tkinter_environment, enable_dpi_awareness, screen_size
+
+configure_tkinter_environment()
+
+import tkinter as tk
 
 from lorena import paths
 from lorena.config import Settings
 from lorena.infra.calibration_repo import CalibrationRepository
-from lorena.infra.platform import enable_dpi_awareness, screen_size
 from lorena.services.cursor import Win32Cursor
 from lorena.services.tracking_pipeline import TrackingPipeline
 from lorena.ui.main_window import AppServices, MainWindow

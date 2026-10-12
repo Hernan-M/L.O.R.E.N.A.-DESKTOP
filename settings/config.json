@@ -1,0 +1,55 @@
+{
+  "camera": {
+    "index": 1,
+    "width": 1280,
+    "height": 720,
+    "fps": 30
+  },
+  "detector": {
+    "min_detection_confidence": 0.5,
+    "min_presence_confidence": 0.5,
+    "min_tracking_confidence": 0.5
+  },
+  "calibration": {
+    "margin_px": 80,
+    "grid": 3,
+    "settle_s": 0.8,
+    "collect_s": 1.2,
+    "min_samples": 12,
+    "max_spread": 0.05,
+    "max_retries": 2,
+    "min_quality": 0.5,
+    "polynomial_degree": 2,
+    "ridge_lambda": 0.001,
+    "use_head_pose": false
+  },
+  "filters": {
+    "min_cutoff": 0.8,
+    "beta": 0.004,
+    "d_cutoff": 1.0,
+    "jump_px": 260.0,
+    "confirm_frames": 3,
+    "fixation_radius_px": 45.0
+  },
+  "blink": {
+    "click_eye": "left",
+    "close_threshold": 0.3,
+    "reopen_threshold": 0.5,
+    "other_open_threshold": 0.45,
+    "closed_ratio": 0.35,
+    "default_open_ear": 0.28,
+    "min_wink_s": 0.2,
+    "max_click_s": 1.0,
+    "max_long_wink_s": 2.5,
+    "pause_hold_s": 1.2,
+    "refractory_s": 0.4,
+    "freeze_rollback_s": 0.15
+  },
+  "tracking": {
+    "click_mode": "wink",
+    "dwell_s": 1.2,
+    "lost_after_s": 0.5,
+    "degraded_quality": 0.6
+  },
+  "profile": "default"
+}

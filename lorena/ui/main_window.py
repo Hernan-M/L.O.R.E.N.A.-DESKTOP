@@ -7,7 +7,7 @@ import time
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import PhotoImage, messagebox
-from tkinter.ttk import Button, Frame, Label
+from tkinter.ttk import Button, Combobox, Frame, Label
 from typing import Callable
 
 from lorena import paths
@@ -21,7 +21,9 @@ from lorena.services.cursor_session import CursorSession
 from lorena.services.tracking_pipeline import TrackingPipeline
 from lorena.ui import theme
 from lorena.ui.calibration_view import CalibrationView
+from lorena.ui.camera_preview import CameraPreview
 from lorena.ui.status_overlay import StatusOverlay
+from lorena.vision.camera import list_available_cameras
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +47,9 @@ class MainWindow:
         self._profile: CalibrationProfile | None = None
         self._listener: Callable[[FrameResult], None] | None = None
         self._overlay = StatusOverlay(root, services.screen)
+        self._cameras: list[tuple[int, str]] = []
+        self._cb_source: Combobox | None = None
+        self._preview: CameraPreview | None = None
         self._build()
         self._load_profile()
         self._root.after(POLL_MS, self._poll)
@@ -67,7 +72,41 @@ class MainWindow:
         logo.pack(pady=(0, 16))
         Label(body, text="Bem-vindo(a) ao LORENA,").pack()
         Label(body, text="seu assistente virtual por eyeTracking").pack()
-        Label(body, text="Escolha uma opção:").pack(pady=10)
+
+        # Seleção da câmera e preview ao lado
+        controls_frame = Frame(body)
+        controls_frame.pack(pady=(12, 6))
+
+        selector_panel = Frame(controls_frame)
+        selector_panel.pack(side="left", padx=(0, 16), anchor="center")
+
+        Label(selector_panel, text="Fonte de captura:", style="Small.TLabel").pack(anchor="w", pady=(0, 4))
+
+        self._cameras = list_available_cameras()
+        current_idx = self._svc.settings.camera.index
+        if not any(idx == current_idx for idx, _ in self._cameras):
+            self._cameras.insert(0, (current_idx, f"Câmera {current_idx}"))
+
+        self._cb_source = Combobox(
+            selector_panel,
+            values=[label for _, label in self._cameras],
+            state="readonly",
+            width=16,
+        )
+        selected_idx = 0
+        for i, (idx, _) in enumerate(self._cameras):
+            if idx == current_idx:
+                selected_idx = i
+                break
+        self._cb_source.current(selected_idx)
+        self._cb_source.bind("<<ComboboxSelected>>", self._on_source_changed)
+        self._cb_source.pack(anchor="w")
+
+        # Preview compacto da câmera ao vivo
+        self._preview = CameraPreview(controls_frame, camera_index=current_idx, width=160, height=120)
+        self._preview.pack(side="left", anchor="center")
+
+        Label(body, text="Escolha uma opção:").pack(pady=(10, 6))
 
         buttons = Frame(body)
         buttons.pack()
@@ -119,6 +158,32 @@ class MainWindow:
         state = ["disabled"] if busy else ["!disabled"]
         self._btn_play.state(state)
         self._btn_cal.state(state)
+        if self._cb_source is not None:
+            self._cb_source.configure(state="disabled" if busy else "readonly")
+
+    def _on_source_changed(self, _event=None) -> None:
+        if self._cb_source is None:
+            return
+        sel_idx = self._cb_source.current()
+        if sel_idx < 0 or sel_idx >= len(self._cameras):
+            return
+        cam_idx, cam_label = self._cameras[sel_idx]
+        if cam_idx == self._svc.settings.camera.index:
+            return
+        log.info("Fonte de captura alterada: %s (índice %d)", cam_label, cam_idx)
+        self._svc.settings.camera.index = cam_idx
+        try:
+            self._svc.pipeline.set_camera_index(cam_idx)
+        except RuntimeError as exc:
+            messagebox.showwarning("Aviso", str(exc))
+            return
+        if self._preview is not None:
+            self._preview.set_camera_index(cam_idx)
+        try:
+            self._svc.settings.save(paths.CONFIG_FILE)
+            log.info("Configuração salva com nova câmera em %s", paths.CONFIG_FILE)
+        except Exception as exc:
+            log.warning("Falha ao salvar configuração: %s", exc)
 
     # ------------------------------------------------------------------- play
     def _on_play(self) -> None:
@@ -131,9 +196,13 @@ class MainWindow:
         messagebox.showinfo("Aviso", "Para sair do rastreio ocular aperte ESC.\n"
                                      "Clique: pisque só o olho esquerdo.\n"
                                      "Pausar/retomar: feche os dois olhos por ~1,5 s.")
+        if self._preview is not None:
+            self._preview.stop()
         try:
             self._svc.pipeline.start(session, stop_on_escape=True)
         except RuntimeError as exc:
+            if self._preview is not None:
+                self._preview.start()
             messagebox.showerror("Erro", str(exc))
             return
         self._listener = self._on_tracking_result
@@ -156,6 +225,8 @@ class MainWindow:
         self._overlay.hide()
         self._set_busy(False)
         self._root.deiconify()
+        if self._preview is not None:
+            self._preview.start()
 
     # -------------------------------------------------------------- calibrate
     def _on_calibrate(self) -> None:
@@ -172,9 +243,13 @@ class MainWindow:
             else:
                 view.on_result(result)
 
+        if self._preview is not None:
+            self._preview.stop()
         try:
             self._svc.pipeline.start(None)
         except RuntimeError as exc:
+            if self._preview is not None:
+                self._preview.start()
             view.close(cancelled=True)
             messagebox.showerror("Erro", str(exc))
             return
@@ -185,6 +260,8 @@ class MainWindow:
         self._listener = None
         self._svc.pipeline.stop()
         self._set_busy(False)
+        if self._preview is not None:
+            self._preview.start()
         if session is None:
             return
         if session.phase is Phase.FAILED:
@@ -223,5 +300,7 @@ class MainWindow:
     # ------------------------------------------------------------------ close
     def _on_close(self) -> None:
         self._listener = None
+        if self._preview is not None:
+            self._preview.stop()
         self._svc.pipeline.stop()
         self._root.destroy()

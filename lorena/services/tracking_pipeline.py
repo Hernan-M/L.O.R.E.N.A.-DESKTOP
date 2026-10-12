@@ -45,6 +45,11 @@ class TrackingPipeline:
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def set_camera_index(self, index: int) -> None:
+        if self.running:
+            raise RuntimeError("Não é possível alterar a fonte durante o rastreio.")
+        self._camera.set_index(index)
+
     def start(self, consumer: FrameConsumer | None = None, stop_on_escape: bool = False) -> None:
         if self.running:
             raise RuntimeError("Pipeline já está em execução.")

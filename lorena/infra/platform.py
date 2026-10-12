@@ -5,10 +5,48 @@ import ctypes
 import logging
 import sys
 
+import os
+from pathlib import Path
+
 log = logging.getLogger(__name__)
 
 IS_WINDOWS = sys.platform == "win32"
 VK_ESCAPE = 0x1B
+
+
+def configure_tkinter_environment() -> None:
+    """Configura automaticamente TCL_LIBRARY e TK_LIBRARY no Windows quando o Python
+    está num venv ou quando as bibliotecas Tcl não estão no caminho padrão."""
+    if not IS_WINDOWS:
+        return
+    if "TCL_LIBRARY" in os.environ and "TK_LIBRARY" in os.environ:
+        return
+
+    localapp = os.environ.get("LOCALAPPDATA", "")
+    search_dirs = [
+        Path(localapp) / "Programs" / "Python",
+        Path("C:/Python313"),
+        Path(sys.base_prefix),
+        Path(sys.prefix),
+    ]
+
+    for base in search_dirs:
+        if not base.exists():
+            continue
+        try:
+            tcl_dirs = list(base.glob("**/tcl/tcl8*")) + list(base.glob("tcl/tcl8*"))
+            if tcl_dirs:
+                tcl_path = tcl_dirs[0]
+                os.environ.setdefault("TCL_LIBRARY", str(tcl_path))
+                tk_path = tcl_path.parent / f"tk{tcl_path.name.replace('tcl', '')}"
+                if tk_path.exists():
+                    os.environ.setdefault("TK_LIBRARY", str(tk_path))
+                break
+        except Exception:
+            continue
+
+
+configure_tkinter_environment()
 
 
 def enable_dpi_awareness() -> None:

@@ -280,6 +280,21 @@ flowchart LR
 - [x] Implementação de ferramentas de apoio: `debug_view.py`, `record_session.py`, `replay_session.py`.
 - [x] Suíte de testes unitários automatizados com 19 testes (100% aprovados).
 
+### v0.2.2 — Seleção de Câmeras e Compatibilidade
+- [x] Detecção dinâmica de câmeras conectadas no sistema via Media Foundation / OpenCV (`list_available_cameras`).
+- [x] Menu inicial com seletor (`ttk.Combobox`) para escolha da fonte de captura de vídeo.
+- [x] Persistência automática da câmera selecionada em `settings/config.json`.
+- [x] Bloqueio do seletor durante calibração e rastreio ativo para evitar alterações concorrentes.
+- [x] Expansão da suíte de testes com testes de câmera e integração de interface (24 testes 100% aprovados).
+
+### v0.2.3 — Preview de Vídeo no Menu Inicial
+- [x] Mini-preview compacto e ao vivo da câmera selecionada posicionado ao lado do dropdown (`CameraPreview`).
+- [x] Captura em thread secundária não-bloqueante a ~15 FPS para fluidez com custo computacional mínimo.
+- [x] Exibição espelhada horizontalmente para experiência intuitiva do usuário ao enquadrar o rosto.
+- [x] Liberação síncrona do dispositivo de câmera ao iniciar sessões de rastreio ou calibração.
+- [x] Tratamento gracioso de erros com tela estática indicativa ("Sem sinal" / "Conectando...").
+- [x] Suíte de testes atualizada com 25 testes automatizados (100% aprovados).
+
 ### v0.3.0 — Refinamento de Precisão
 - [ ] Ativação da compensação da pose da cabeça (yaw e pitch da matriz facial do MediaPipe) na regressão polinomial.
 - [ ] Recalibração de deriva de ponto único (calibração rápida de 1 ponto para ajuste de bias sem precisar refazer os 9 pontos).
@@ -296,7 +311,7 @@ flowchart LR
 - [ ] Gerenciamento de múltiplos perfis de usuário com calibrações salvas independentes.
 - [ ] Suporte nativo a múltiplos monitores com seleção de tela ativa.
 - [ ] Algoritmo de filtragem e compensação de reflexos para usuários de óculos com antirreflexo parcial.
-- [ ] Diálogo gráfico de seleção de dispositivos de câmera e resolução na interface.
+- [ ] Seletor avançado de resolução e taxa de quadros (FPS) na interface de configurações.
 
 ### v1.0.0 — Produto Distribuível
 - [ ] Empacotamento em executável único com instalador Windows (via PyInstaller e InnoSetup).
@@ -331,4 +346,7 @@ flowchart LR
 | **2026-10-12 (v0.2.0)** | **Fase 2: Novo Núcleo de Visão** | Implementação de `FaceLandmarkDetector` (MediaPipe Tasks), `GazeFeatureExtractor` (vetores anatômicos contínuos) e `BlinkDetector` (FSM de EAR). Exclusão da pasta legada `gaze_tracking/` e de ~109 MB de modelos dlib `.dat`. | Aprovado |
 | **2026-10-12 (v0.2.0)** | **Fase 3: Mapeamento e Calibração** | Implementação de `CalibrationSession` automática com rejeição por MAD, `GazeMapper` com regressão polinomial 2D e regularização Ridge, e `CalibrationView`. | Aprovado |
 | **2026-10-12 (v0.2.0)** | **Fase 4: Estabilização e Ferramentas** | Implementação de `OneEuroFilter2D`, `OutlierGate`, `FixationStabilizer`, `StatusOverlay`, `tools/debug_view.py`, `tools/replay_session.py` e suíte de 19 testes automatizados (`tests/`). | 19/19 testes passando |
+| **2026-10-12 (v0.2.1)** | **Compatibilidade Windows / Tkinter** | Resolução do erro `_tkinter.TclError: Can't find a usable init.tcl` em venv: auto-detecção dos caminhos `tcl8.6` e `tk8.6` em `lorena.infra.platform`. Adição de alias `eyemouse.py`. | 19/19 testes passando |
+| **2026-10-12 (v0.2.2)** | **Interface / Captura** | Adição de seletor dinâmico (`ttk.Combobox`) de fonte de captura de vídeo no menu principal com auto-descoberta via Media Foundation / OpenCV, suporte a troca de câmera antes do tracking/calibração, persistência automática em `settings/config.json` e 5 novos testes unitários e de integração (`test_camera.py`, `test_ui_main_window.py`). | 24/24 testes passando |
+| **2026-10-12 (v0.2.3)** | **Interface / Preview** | Implementação do componente `CameraPreview` ao lado do dropdown de câmeras no menu principal, exibindo feed ao vivo espelhado em thread dedicada com taxa controlada (~15 FPS), transição automática com placeholder estático ("Sem sinal" / "Conectando..."), liberação imediata de hardware ao entrar em Play/Calibrar e novo teste unitário (`test_camera_preview.py`). | 25/25 testes passando |
 
