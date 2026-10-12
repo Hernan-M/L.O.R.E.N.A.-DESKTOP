@@ -1,0 +1,1 @@
+"""Módulos de visão computacional."""
