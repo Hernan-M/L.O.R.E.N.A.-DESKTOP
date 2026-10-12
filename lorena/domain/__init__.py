@@ -1,0 +1,1 @@
+"""Domínio do sistema."""
