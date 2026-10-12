@@ -57,30 +57,54 @@ class MainWindow:
     # ------------------------------------------------------------------ build
     def _build(self) -> None:
         r, (sw, sh) = self._root, self._svc.screen
-        r.title("L.O.R.E.N.A.")
-        r.geometry(f"{sw // 2}x{sh // 2}+{sw // 4}+{sh // 4}")
+        r.title("L.O.R.E.N.A. — Assistente por Rastreio Ocular")
+        win_w = max(720, min(860, sw // 2))
+        win_h = max(530, min(620, sh // 2))
+        r.geometry(f"{win_w}x{win_h}+{(sw - win_w) // 2}+{(sh - win_h) // 2}")
+        r.minsize(660, 480)
         r.configure(bg=theme.BG)
         theme.apply()
         self._logo = PhotoImage(file=str(paths.LOGO_IMAGE))
         r.iconphoto(False, self._logo)
 
-        body = Frame(r)
-        body.pack(expand=True)
-        small_logo = self._logo.subsample(5, 5)
-        logo = Label(body, image=small_logo)
+        container = Frame(r, style="TFrame")
+        container.pack(expand=True, fill="both", padx=24, pady=16)
+
+        # Cabeçalho com Logo e Título
+        header = Frame(container, style="TFrame")
+        header.pack(pady=(0, 14))
+
+        small_logo = self._logo.subsample(6, 6)
+        logo = Label(header, image=small_logo, style="TLabel")
         logo.image = small_logo
-        logo.pack(pady=(0, 16))
-        Label(body, text="Bem-vindo(a) ao LORENA,").pack()
-        Label(body, text="seu assistente virtual por eyeTracking").pack()
+        logo.pack(side="left", padx=(0, 14))
 
-        # Seleção da câmera e preview ao lado
-        controls_frame = Frame(body)
-        controls_frame.pack(pady=(12, 6))
+        header_text = Frame(header, style="TFrame")
+        header_text.pack(side="left")
+        Label(header_text, text="L.O.R.E.N.A.", style="Header.TLabel").pack(anchor="w")
+        Label(
+            header_text,
+            text="Assistente de Acessibilidade por Rastreio Ocular",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w")
 
-        selector_panel = Frame(controls_frame)
-        selector_panel.pack(side="left", padx=(0, 16), anchor="center")
+        # Card Central: Configuração + Preview
+        card = Frame(container, style="Card.TFrame")
+        card.pack(fill="x", padx=10, pady=(0, 16))
 
-        Label(selector_panel, text="Fonte de captura:", style="Small.TLabel").pack(anchor="w", pady=(0, 4))
+        card_content = Frame(card, style="Card.TFrame")
+        card_content.pack(padx=24, pady=16, fill="x")
+
+        # Coluna Esquerda: Dispositivo e Status da Calibração
+        left_col = Frame(card_content, style="Card.TFrame")
+        left_col.pack(side="left", fill="both", expand=True, padx=(0, 24))
+
+        Label(left_col, text="DISPOSITIVO DE CAPTURA", style="CardHeader.TLabel").pack(anchor="w", pady=(0, 8))
+
+        source_row = Frame(left_col, style="Card.TFrame")
+        source_row.pack(anchor="w", pady=(0, 14))
+
+        Label(source_row, text="Câmera:", style="Card.TLabel").pack(side="left", padx=(0, 8))
 
         self._cameras = list_available_cameras()
         current_idx = self._svc.settings.camera.index
@@ -88,10 +112,10 @@ class MainWindow:
             self._cameras.insert(0, (current_idx, f"Câmera {current_idx}"))
 
         self._cb_source = Combobox(
-            selector_panel,
+            source_row,
             values=[label for _, label in self._cameras],
             state="readonly",
-            width=16,
+            width=18,
         )
         selected_idx = 0
         for i, (idx, _) in enumerate(self._cameras):
@@ -100,22 +124,50 @@ class MainWindow:
                 break
         self._cb_source.current(selected_idx)
         self._cb_source.bind("<<ComboboxSelected>>", self._on_source_changed)
-        self._cb_source.pack(anchor="w")
+        self._cb_source.pack(side="left")
 
-        # Preview compacto da câmera ao vivo
-        self._preview = CameraPreview(controls_frame, camera_index=current_idx, width=160, height=120)
-        self._preview.pack(side="left", anchor="center")
+        Label(left_col, text="STATUS DO SISTEMA", style="CardHeader.TLabel").pack(anchor="w", pady=(6, 4))
+        self._status = Label(left_col, style="StatusWarn.TLabel")
+        self._status.pack(anchor="w")
 
-        Label(body, text="Escolha uma opção:").pack(pady=(10, 6))
+        # Coluna Direita: Pré-visualização da Câmera
+        right_col = Frame(card_content, style="Card.TFrame")
+        right_col.pack(side="right")
 
-        buttons = Frame(body)
-        buttons.pack()
-        self._btn_play = Button(buttons, text="Play", command=self._on_play, cursor="hand2")
-        self._btn_play.grid(row=0, column=0, padx=10, pady=10)
-        self._btn_cal = Button(buttons, text="Calibrar", command=self._on_calibrate, cursor="hand2")
-        self._btn_cal.grid(row=0, column=1, padx=10, pady=10)
-        self._status = Label(body, style="Small.TLabel")
-        self._status.pack(pady=(8, 0))
+        Label(right_col, text="PRÉ-VISUALIZAÇÃO", style="CardHeader.TLabel").pack(anchor="center", pady=(0, 6))
+        self._preview = CameraPreview(right_col, camera_index=current_idx, width=180, height=135, style="Card.TFrame")
+        self._preview.pack(anchor="center")
+
+        # Painel de Ações
+        buttons = Frame(container, style="TFrame")
+        buttons.pack(pady=(4, 12))
+
+        self._btn_play = Button(
+            buttons,
+            text="▶  Iniciar Rastreio",
+            style="TButton",
+            command=self._on_play,
+            cursor="hand2",
+        )
+        self._btn_play.grid(row=0, column=0, padx=8, pady=4)
+
+        self._btn_cal = Button(
+            buttons,
+            text="🎯  Calibrar Olhar",
+            style="Secondary.TButton",
+            command=self._on_calibrate,
+            cursor="hand2",
+        )
+        self._btn_cal.grid(row=0, column=1, padx=8, pady=4)
+
+        # Rodapé informativo
+        footer = Frame(container, style="TFrame")
+        footer.pack()
+        Label(
+            footer,
+            text="Dica: Pressione ESC para sair do rastreio • Pisque o olho esquerdo para clicar",
+            style="Hint.TLabel",
+        ).pack()
 
         r.bind("<Return>", lambda _e: getattr(r.focus_get(), "invoke", lambda: None)())
         r.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -131,11 +183,18 @@ class MainWindow:
     def _set_profile(self, profile: CalibrationProfile | None) -> None:
         self._profile = profile
         if profile is None:
-            self._status.configure(text="Nenhuma calibração válida — calibre antes de iniciar.")
+            self._status.configure(
+                text="⚠  Nenhuma calibração ativa — calibre antes de iniciar.",
+                style="StatusWarn.TLabel",
+            )
             return
         self._svc.pipeline.extractor.openness.set_baseline(profile.open_ear_left, profile.open_ear_right)
         when = time.strftime("%d/%m/%Y %H:%M", time.localtime(profile.created_at))
-        self._status.configure(text=f"Calibrado em {when} • erro médio ≈ {self._report_error(profile):.0f} px")
+        err = self._report_error(profile)
+        self._status.configure(
+            text=f"✓  Calibrado em {when} • Erro médio ≈ {err:.0f} px",
+            style="StatusOk.TLabel",
+        )
 
     @staticmethod
     def _report_error(profile: CalibrationProfile) -> float:

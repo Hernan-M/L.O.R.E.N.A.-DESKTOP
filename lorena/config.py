@@ -26,6 +26,9 @@ class DetectorSettings:
     min_detection_confidence: float = 0.5
     min_presence_confidence: float = 0.5
     min_tracking_confidence: float = 0.5
+    use_clahe: bool = True
+    clahe_clip_limit: float = 2.0
+    clahe_lum_threshold: float = 110.0
 
 
 @dataclass
@@ -40,7 +43,7 @@ class CalibrationSettings:
     min_quality: float = 0.5
     polynomial_degree: int = 2
     ridge_lambda: float = 1e-3
-    use_head_pose: bool = False
+    use_head_pose: bool = True
 
 
 @dataclass

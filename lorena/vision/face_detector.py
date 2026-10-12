@@ -70,6 +70,18 @@ def face_from_landmarks(points: np.ndarray, timestamp: float, matrix: np.ndarray
     )
 
 
+def enhance_contrast_adaptive(frame_bgr: np.ndarray, clip_limit: float = 2.0, lum_threshold: float = 110.0) -> np.ndarray:
+    """Aplica equalização CLAHE no canal L (LAB) se a iluminação estiver baixa."""
+    lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    if float(np.mean(l_channel)) < lum_threshold:
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l_channel)
+        lab = cv2.merge([l_enhanced, a_channel, b_channel])
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    return frame_bgr
+
+
 class FaceLandmarkDetector:
     """Wrapper do ``FaceLandmarker`` em modo VIDEO (usa rastreio entre frames)."""
 
@@ -78,6 +90,7 @@ class FaceLandmarkDetector:
         from mediapipe.tasks.python import BaseOptions, vision
 
         self._mp = mp
+        self._settings = settings
         # model_asset_buffer evita problemas do MediaPipe com caminhos não-ASCII/OneDrive.
         options = vision.FaceLandmarkerOptions(
             base_options=BaseOptions(model_asset_buffer=Path(model_path).read_bytes()),
@@ -95,7 +108,16 @@ class FaceLandmarkDetector:
     def detect(self, frame_bgr: np.ndarray, timestamp: float) -> FaceObservation | None:
         ts_ms = max(int(timestamp * 1000), self._last_ts_ms + 1)  # precisa ser estritamente crescente
         self._last_ts_ms = ts_ms
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        processed_bgr = (
+            enhance_contrast_adaptive(
+                frame_bgr,
+                self._settings.clahe_clip_limit,
+                self._settings.clahe_lum_threshold,
+            )
+            if self._settings.use_clahe
+            else frame_bgr
+        )
+        rgb = cv2.cvtColor(processed_bgr, cv2.COLOR_BGR2RGB)
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         result = self._landmarker.detect_for_video(image, ts_ms)
         if not result.face_landmarks:

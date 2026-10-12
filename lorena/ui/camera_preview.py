@@ -51,8 +51,9 @@ class CameraPreview(Frame):
         camera_index: int = 0,
         width: int = DEFAULT_WIDTH,
         height: int = DEFAULT_HEIGHT,
+        style: str = "Card.TFrame",
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent, style=style)
         self._camera_index = camera_index
         self._width = width
         self._height = height
@@ -74,7 +75,7 @@ class CameraPreview(Frame):
 
         self._label = tk.Label(
             self._border_frame,
-            bg=theme.BG,
+            bg=theme.SURFACE,
             width=self._width,
             height=self._height,
         )
@@ -124,14 +125,14 @@ class CameraPreview(Frame):
 
     def _show_placeholder(self, text: str) -> None:
         """Gera imagem estática com mensagem para manter as dimensões estáveis."""
-        img = np.full((self._height, self._width, 3), (11, 31, 48), dtype=np.uint8)
+        img = np.full((self._height, self._width, 3), (17, 38, 56), dtype=np.uint8)
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.38
         thickness = 1
         (tw, th), _ = cv2.getTextSize(text, font, font_scale, thickness)
         tx = max(4, (self._width - tw) // 2)
         ty = max(th + 4, (self._height + th) // 2)
-        cv2.putText(img, text, (tx, ty), font, font_scale, (159, 179, 200), thickness, cv2.LINE_AA)
+        cv2.putText(img, text, (tx, ty), font, font_scale, (143, 166, 190), thickness, cv2.LINE_AA)
 
         try:
             photo = ImageTk.PhotoImage(image=Image.fromarray(img))
@@ -141,7 +142,7 @@ class CameraPreview(Frame):
             pass
 
     def _worker(self) -> None:
-        backends = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
+        backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
         cap = None
 
         with _suppress_c_stderr():

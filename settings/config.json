@@ -8,7 +8,10 @@
   "detector": {
     "min_detection_confidence": 0.5,
     "min_presence_confidence": 0.5,
-    "min_tracking_confidence": 0.5
+    "min_tracking_confidence": 0.5,
+    "use_clahe": true,
+    "clahe_clip_limit": 2.0,
+    "clahe_lum_threshold": 110.0
   },
   "calibration": {
     "margin_px": 80,
@@ -21,7 +24,7 @@
     "min_quality": 0.5,
     "polynomial_degree": 2,
     "ridge_lambda": 0.001,
-    "use_head_pose": false
+    "use_head_pose": true
   },
   "filters": {
     "min_cutoff": 0.8,

@@ -295,11 +295,13 @@ flowchart LR
 - [x] Tratamento gracioso de erros com tela estática indicativa ("Sem sinal" / "Conectando...").
 - [x] Suíte de testes atualizada com 25 testes automatizados (100% aprovados).
 
-### v0.3.0 — Refinamento de Precisão
-- [ ] Ativação da compensação da pose da cabeça (yaw e pitch da matriz facial do MediaPipe) na regressão polinomial.
-- [ ] Recalibração de deriva de ponto único (calibração rápida de 1 ponto para ajuste de bias sem precisar refazer os 9 pontos).
-- [ ] Pré-processamento adaptativo CLAHE no canal L para melhorar a visibilidade em ambientes com iluminação deficiente.
-- [ ] Modo de teste de acurácia com alvos aleatórios gerando relatório quantitativo de erro em pixels e graus de campo visual.
+### v0.3.0 — Refinamento de Precisão e Interface Ergonômica
+- [x] Ativação da compensação da pose da cabeça (yaw e pitch da matriz facial do MediaPipe) na regressão polinomial.
+- [x] Recalibração de deriva de ponto único (calibração rápida de 1 ponto para ajuste de bias sem precisar refazer os 9 pontos).
+- [x] Pré-processamento adaptativo CLAHE no canal L para melhorar a visibilidade em ambientes com iluminação deficiente.
+- [x] Modo de teste de acurácia com alvos aleatórios gerando relatório quantitativo de erro em pixels e graus de campo visual (`AccuracyEvaluator`).
+- [x] Redesign ergonômico da interface gráfica com estrutura em card, hierarquia visual clara, tipografia Segoe UI e badges informativos.
+- [x] Expansão da suíte de testes automatizados para 29 testes (100% aprovados).
 
 ### v0.4.0 — Interações Avançadas e Acessibilidade
 - [ ] Scroll automático bidirecional por zonas de olhar periféricas na tela.
@@ -349,4 +351,5 @@ flowchart LR
 | **2026-10-12 (v0.2.1)** | **Compatibilidade Windows / Tkinter** | Resolução do erro `_tkinter.TclError: Can't find a usable init.tcl` em venv: auto-detecção dos caminhos `tcl8.6` e `tk8.6` em `lorena.infra.platform`. Adição de alias `eyemouse.py`. | 19/19 testes passando |
 | **2026-10-12 (v0.2.2)** | **Interface / Captura** | Adição de seletor dinâmico (`ttk.Combobox`) de fonte de captura de vídeo no menu principal com auto-descoberta via Media Foundation / OpenCV, suporte a troca de câmera antes do tracking/calibração, persistência automática em `settings/config.json` e 5 novos testes unitários e de integração (`test_camera.py`, `test_ui_main_window.py`). | 24/24 testes passando |
 | **2026-10-12 (v0.2.3)** | **Interface / Preview** | Implementação do componente `CameraPreview` ao lado do dropdown de câmeras no menu principal, exibindo feed ao vivo espelhado em thread dedicada com taxa controlada (~15 FPS), transição automática com placeholder estático ("Sem sinal" / "Conectando..."), liberação imediata de hardware ao entrar em Play/Calibrar e novo teste unitário (`test_camera_preview.py`). | 25/25 testes passando |
+| **2026-10-12 (v0.3.0)** | **Refinamento de Cálculos e UI** | Conclusão do pacote v0.3.0: compensação ativa de head pose (yaw/pitch) na regressão polinomial 2D, recalibração de deriva de 1 ponto com offset persistido, pré-processamento adaptativo CLAHE no canal L para ambientes escuros, serviço `AccuracyEvaluator` com cálculo de erro angular em graus visuais, redesign ergonômico da UI com layout em card centralizado, tipografia nativa Segoe UI, badges de status e 4 novos testes unitários (`test_tracking_refinements.py`). | 29/29 testes passando |
 

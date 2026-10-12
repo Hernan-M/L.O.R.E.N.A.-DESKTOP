@@ -35,13 +35,14 @@ class GazeMapper:
     VERSION = 1
 
     def __init__(self, degree: int = 2, ridge_lambda: float = 1e-3, use_head_pose: bool = False,
-                 screen_size: tuple[int, int] = (1920, 1080)) -> None:
+                 screen_size: tuple[int, int] = (1920, 1080), offset: tuple[float, float] = (0.0, 0.0)) -> None:
         if degree not in (1, 2):
             raise ValueError("degree deve ser 1 ou 2")
         self.degree = degree
         self.ridge_lambda = ridge_lambda
         self.use_head_pose = use_head_pose
         self.screen_size = screen_size
+        self.offset = np.array(offset, dtype=float)
         self._mu: np.ndarray | None = None
         self._sigma: np.ndarray | None = None
         self._beta: np.ndarray | None = None
@@ -71,6 +72,22 @@ class GazeMapper:
     def is_fitted(self) -> bool:
         return self._beta is not None
 
+    def set_drift_offset(self, offset: tuple[float, float]) -> None:
+        """Define o deslocamento estático de correção de deriva."""
+        self.offset = np.array(offset, dtype=float)
+
+    def reset_drift_offset(self) -> None:
+        """Zera qualquer compensação de deriva ativa."""
+        self.offset = np.zeros(2, dtype=float)
+
+    def recalibrate_drift(self, f: GazeFeatures, target: tuple[float, float]) -> tuple[float, float]:
+        """Calcula e aplica offset de 1 ponto contra o alvo especificado."""
+        base_pred = self.predict_unbiased(f)
+        dx = float(target[0] - base_pred[0])
+        dy = float(target[1] - base_pred[1])
+        self.set_drift_offset((dx, dy))
+        return (dx, dy)
+
     # --------------------------------------------------------------------- fit
     @staticmethod
     def _arrays(samples: list[CalibrationSample]):
@@ -89,8 +106,11 @@ class GazeMapper:
     def fit(self, samples: list[CalibrationSample]) -> CalibrationReport:
         h, v, yaw, pitch, targets, idx = self._arrays(samples)
         points = np.unique(idx)
-        if len(points) < self.num_terms - (2 if self.use_head_pose else 0):
+        min_required = self.num_terms - (2 if self.use_head_pose else 0)
+        if len(points) < min_required:
             raise ValueError(f"Pontos insuficientes ({len(points)}) para grau {self.degree}.")
+        if self.use_head_pose and len(points) < self.num_terms:
+            self.use_head_pose = False
         raw = self._raw(h, v, yaw, pitch)
 
         loo_errors = []
@@ -113,14 +133,19 @@ class GazeMapper:
         )
 
     # ----------------------------------------------------------------- predict
-    def predict(self, f: GazeFeatures) -> np.ndarray:
-        return self.predict_raw(f.h, f.v, f.yaw, f.pitch)
+    def predict_unbiased(self, f: GazeFeatures) -> np.ndarray:
+        return self.predict_raw(f.h, f.v, f.yaw, f.pitch, apply_offset=False)
 
-    def predict_raw(self, h: float, v: float, yaw: float = 0.0, pitch: float = 0.0) -> np.ndarray:
+    def predict(self, f: GazeFeatures) -> np.ndarray:
+        return self.predict_raw(f.h, f.v, f.yaw, f.pitch, apply_offset=True)
+
+    def predict_raw(self, h: float, v: float, yaw: float = 0.0, pitch: float = 0.0, apply_offset: bool = True) -> np.ndarray:
         if self._beta is None:
             raise NotFittedError("GazeMapper não calibrado.")
         raw = self._raw(np.array([h]), np.array([v]), np.array([yaw]), np.array([pitch]))
         p = (self._design(raw) @ self._beta)[0]
+        if apply_offset:
+            p = p + self.offset
         w, hgt = self.screen_size
         return np.array([np.clip(p[0], 0, w - 1), np.clip(p[1], 0, hgt - 1)])
 
@@ -134,6 +159,7 @@ class GazeMapper:
             "ridge_lambda": self.ridge_lambda,
             "use_head_pose": self.use_head_pose,
             "screen_size": list(self.screen_size),
+            "offset": self.offset.tolist(),
             "mu": np.asarray(self._mu).tolist(),
             "sigma": np.asarray(self._sigma).tolist(),
             "beta": np.asarray(self._beta).tolist(),
@@ -143,7 +169,8 @@ class GazeMapper:
     def from_dict(cls, d: dict) -> "GazeMapper":
         if d.get("version") != cls.VERSION:
             raise ValueError("Versão de mapeador incompatível.")
-        m = cls(d["degree"], d["ridge_lambda"], d["use_head_pose"], tuple(d["screen_size"]))
+        offset = tuple(d.get("offset", [0.0, 0.0]))
+        m = cls(d["degree"], d["ridge_lambda"], d["use_head_pose"], tuple(d["screen_size"]), offset=offset)
         m._mu = np.array(d["mu"], dtype=float)
         m._sigma = np.array(d["sigma"], dtype=float)
         m._beta = np.array(d["beta"], dtype=float)
