@@ -77,6 +77,11 @@ class FilterSettings:
     kinematic_prediction: bool = True     # Projeção preditiva cinemática (elimina atraso de captura)
     lead_time_s: float = 0.020            # Tempo de avanço preditivo (~20 ms compensa sensor USB)
     saccade_velocity_threshold: float = 80.0 # Velocidade mínima (px/s) para ativar avanço
+    isotropic_smoothing: bool = True      # Suavização 2D isotrópica (norma Euclidiana invariante a rotação)
+    smooth_deadzone: bool = True          # Estabilizador com âncora contínua (elimina efeito escada/ratchet)
+    break_deadzone_mult: float = 2.5      # Múltiplo do raio para ruptura sacádica da fixação
+    freeze_confirm_frames: int = 2        # Frames consecutivos para confirmar congelamento pré-gesto
+    catchup_rate: float = 0.25            # Taxa de convergência/relaxamento da âncora ao alvo após perseguição
 
 
 @dataclass

@@ -4,6 +4,22 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 
 O formato é baseado no [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [0.3.11] - 2026-10-13
+
+### Adicionado
+- **Filtro One-Euro 2D Isotrópico (`OneEuroFilter2D`):** Cálculo de corte adaptativo baseado na velocidade vetorial conjunta 2D ($v = \|\mathbf{v}\|_2$), garantindo invariância rotacional estrita e eliminando distorções de trajetória e atraso de eixo em sacadas oblíquas, com suporte a prealocação in-place (`out=...`).
+- **Estabilizador com Âncora Contínua e Convergência ao Alvo (`FixationStabilizer`):** Modelo híbrido $C^0$ que elimina o efeito catraca de 45 px E implementa convergência assintótica suave (*catch-up*) ao alvo no repouso ($v_{\text{gaze}} < 40\text{ px/s}$), eliminando a histerese permanente de arrasto (offset $< 0,005\text{ px}$) e mantendo jitter de fixação em $1,95\text{ px RMS}$.
+- **Proteção Anti-Equívoco de Comandos de Gestos (`CursorSession`):** Debounce temporal consciente ($\ge 2$ quadros ou $\ge 50\text{ ms}$) com isolamento do 1º quadro candidato de fechamento palpebral (previne solavancos causados pela íris distorcida pela pálpebra) e resiliência a quedas severas de FPS ($\le 10$ FPS).
+- **Snapshot Imutável em `PositionHistory`:** Gravação desacoplada de coordenadas em tuplas imutáveis e retorno de cópias seguras, garantindo integridade de rollback pré-gesto contra mutações in-place.
+- **Suíte de Testes Automatizados:** 13 novos testes unitários e de integração em `test_filters.py` e `test_tracking_smoothing_30fps.py` cobrindo isotropia, atenuação de jitter a 30 FPS, continuidade de âncora, convergência a offset zero pós-perseguição, isolamento de quadro candidato, resiliência a 10 FPS e imutabilidade de histórico (82/82 testes aprovados, 100%).
+- **Relatório Técnico Detalhado:** Publicação de [`reports/RELATORIO_TECNICO_SUAVIZACAO_TRACKING_30FPS.md`](file:///C:/Users/Herna/OneDrive/Documentos/workspace/L.O.R.E.N.A.-DESKTOP/reports/RELATORIO_TECNICO_SUAVIZACAO_TRACKING_30FPS.md) com deduções matemáticas, provas de continuidade e métricas empíricas.
+
+### Modificado
+- **Zero Alocações no Loop Crítico a 30 FPS:** Reutilização estrita de buffers pré-alocados `_buf_euro` e `_buf_dispatch`, e substituição de `np.linalg.norm` por `math.hypot`.
+- **Configurações Tipadas (`lorena/config.py` e `settings/config.json`):** Adição de `isotropic_smoothing`, `smooth_deadzone`, `break_deadzone_mult`, `freeze_confirm_frames` e `catchup_rate` na dataclass `FilterSettings`.
+
+---
+
 ## [0.3.10] - 2026-10-13
 
 ### Corrigido

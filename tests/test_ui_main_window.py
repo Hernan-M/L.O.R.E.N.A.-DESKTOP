@@ -199,16 +199,12 @@ def test_main_window_refresh_cameras(monkeypatch):
             pass
 
 
-def test_main_window_auto_promotes_rgb_camera_over_default_ir(monkeypatch):
-    configure_tkinter_environment()
-    import tkinter as tk
-
+def test_main_window_auto_promotes_rgb_camera_over_default_ir(monkeypatch, tk_root):
     # Câmera 0 é IR, Câmera 1 é RGB
     cams_detected = [(1, "Câmera 1 (RGB / Colorida)"), (0, "Câmera 0 (Sensor IR ou Tampa Fechada)")]
     monkeypatch.setattr("lorena.ui.main_window.list_available_cameras", lambda: cams_detected)
 
-    root = tk.Tk()
-    root.withdraw()
+    root = tk_root
 
     # Configuração padrão tem index: 0 (IR)
     settings = Settings()
@@ -226,14 +222,8 @@ def test_main_window_auto_promotes_rgb_camera_over_default_ir(monkeypatch):
         cursor=mock_cursor,
     )
 
-    try:
-        win = MainWindow(root, services)
-        # Deve ter auto-promovido para Câmera 1 (RGB)
-        assert win._svc.settings.camera.index == 1
-        assert win._cb_source.current() == 0  # Índice 0 na lista é Câmera 1 (RGB)
-        win._on_close()
-    finally:
-        try:
-            root.destroy()
-        except Exception:
-            pass
+    win = MainWindow(root, services)
+    # Deve ter auto-promovido para Câmera 1 (RGB)
+    assert win._svc.settings.camera.index == 1
+    assert win._cb_source.current() == 0  # Índice 0 na lista é Câmera 1 (RGB)
+    win._on_close()
