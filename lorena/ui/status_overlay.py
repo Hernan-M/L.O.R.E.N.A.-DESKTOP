@@ -55,7 +55,9 @@ class StatusOverlay:
         if status is None:
             return
         text, color = _STATE_TEXT.get(status.state, ("", theme.FG))
-        if getattr(status, "hint", None) == "head":
+        if getattr(status, "hint", None) == "camera_reconnecting":
+            text, color = "Câmera sem sinal — reconectando...", theme.ERROR
+        elif getattr(status, "hint", None) == "head":
             text, color = "Cabeça muito virada — volte ao centro", theme.WARN
         elif getattr(status, "hint", None) == "light":
             text, color = "Iluminação mudou — recomenda-se recalibrar", theme.WARN

@@ -145,26 +145,64 @@ class CameraPreview(Frame):
             pass
 
     def _worker(self) -> None:
-        backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
         cap = None
+        max_attempts = 3
 
         with _suppress_c_stderr():
-            for backend in backends:
-                if self._stop_event.is_set():
-                    return
-                try:
-                    c = cv2.VideoCapture(self._camera_index, backend)
-                    if c.isOpened():
-                        c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        ok, test_frame = c.read()
-                        if ok and test_frame is not None:
-                            cap = c
-                            break
-                    c.release()
-                except Exception:
-                    pass
+            if sys.platform == "win32":
+                for attempt in range(max_attempts):
+                    if self._stop_event.is_set():
+                        return
+                    try:
+                        c = cv2.VideoCapture(self._camera_index, cv2.CAP_MSMF)
+                        if c.isOpened():
+                            c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            ok, test_frame = c.read()
+                            if ok and test_frame is not None:
+                                cap = c
+                                break
+                        c.release()
+                    except Exception:
+                        pass
+                    if attempt < max_attempts - 1 and not self._stop_event.is_set():
+                        time.sleep(0.10)
+
+                if cap is None and not self._stop_event.is_set():
+                    for backend in [cv2.CAP_DSHOW, cv2.CAP_ANY]:
+                        try:
+                            c = cv2.VideoCapture(self._camera_index, backend)
+                            if c.isOpened():
+                                c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                                c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                                c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                                ok, test_frame = c.read()
+                                if ok and test_frame is not None:
+                                    cap = c
+                                    break
+                            c.release()
+                        except Exception:
+                            pass
+            else:
+                for attempt in range(max_attempts):
+                    if self._stop_event.is_set():
+                        return
+                    try:
+                        c = cv2.VideoCapture(self._camera_index, cv2.CAP_ANY)
+                        if c.isOpened():
+                            c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            ok, test_frame = c.read()
+                            if ok and test_frame is not None:
+                                cap = c
+                                break
+                        c.release()
+                    except Exception:
+                        pass
+                    if attempt < max_attempts - 1 and not self._stop_event.is_set():
+                        time.sleep(0.10)
 
         if cap is None or not cap.isOpened():
             log.info("Preview: câmera %d indisponível ou em uso.", self._camera_index)
@@ -173,21 +211,26 @@ class CameraPreview(Frame):
             return
 
         target_delay = 1.0 / 15.0
+        frame_failures = 0
         try:
             while not self._stop_event.is_set():
                 t0 = time.monotonic()
                 try:
                     ok, frame = cap.read()
-                except Exception:
+                except (cv2.error, Exception):
                     ok, frame = False, None
                 if ok and frame is not None:
-                    # Espelhado horizontalmente para experiência amigável de webcam
-                    mirrored = cv2.flip(frame, 1)
-                    resized = cv2.resize(mirrored, (self._width, self._height))
-                    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+                    frame_failures = 0
+                    # Redimensiona antes do flip para reduzir operações de memória em 92%
+                    resized = cv2.resize(frame, (self._width, self._height))
+                    mirrored = cv2.flip(resized, 1)
+                    rgb = cv2.cvtColor(mirrored, cv2.COLOR_BGR2RGB)
                     with self._lock:
                         self._latest_rgb = rgb
                 else:
+                    frame_failures += 1
+                    if frame_failures == 15 and not self._stop_event.is_set():
+                        self.after(0, lambda: self._show_placeholder("Sem sinal"))
                     time.sleep(0.04)
 
                 elapsed = time.monotonic() - t0

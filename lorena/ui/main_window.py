@@ -67,8 +67,12 @@ class MainWindow:
         r.minsize(660, 480)
         r.configure(bg=theme.BG)
         theme.apply()
-        self._logo = PhotoImage(file=str(paths.LOGO_IMAGE))
-        r.iconphoto(False, self._logo)
+        try:
+            self._logo = PhotoImage(master=r, file=str(paths.LOGO_IMAGE))
+            r.iconphoto(False, self._logo)
+        except Exception as exc:
+            log.debug("Não foi possível carregar o ícone da janela: %s", exc)
+            self._logo = None
 
         container = Frame(r, style="TFrame")
         container.pack(expand=True, fill="both", padx=24, pady=16)
@@ -77,10 +81,15 @@ class MainWindow:
         header = Frame(container, style="TFrame")
         header.pack(pady=(0, 14))
 
-        small_logo = self._logo.subsample(6, 6)
-        logo = Label(header, image=small_logo, style="TLabel")
-        logo.image = small_logo
-        logo.pack(side="left", padx=(0, 14))
+        if self._logo is not None:
+            try:
+                small_logo = self._logo.subsample(6, 6)
+                logo = Label(header, image=small_logo, style="TLabel")
+                logo.image = small_logo
+                logo.pack(side="left", padx=(0, 14))
+            except Exception as exc:
+                log.debug("Não foi possível renderizar imagem do cabeçalho: %s", exc)
+
 
         header_text = Frame(header, style="TFrame")
         header_text.pack(side="left")
@@ -110,34 +119,61 @@ class MainWindow:
         Label(source_row, text="Câmera:", style="Card.TLabel").pack(side="left", padx=(0, 8))
 
         self._cameras = list_available_cameras()
+        log.info("Verificação de fontes ao iniciar: %d fontes detectadas: %s", len(self._cameras), self._cameras)
+
         current_idx = self._svc.settings.camera.index
+        current_is_color = any(idx == current_idx and "RGB" in label for idx, label in self._cameras)
+        has_color_available = bool(self._cameras and "RGB" in self._cameras[0][1])
+
         if not any(idx == current_idx for idx, _ in self._cameras) and self._cameras:
             current_idx = self._cameras[0][0]
+            log.warning("Câmera configurada %d indisponível; alternando para fonte %d (%s)",
+                        self._svc.settings.camera.index, current_idx, self._cameras[0][1])
             self._svc.settings.camera.index = current_idx
             try:
                 self._svc.pipeline.set_camera_index(current_idx)
-            except Exception:
-                pass
-            try:
                 self._svc.settings.save(paths.CONFIG_FILE)
                 log.info("Configuração atualizada com fonte padrão válida: índice %d", current_idx)
             except Exception as exc:
                 log.warning("Falha ao salvar configuração: %s", exc)
+        elif not current_is_color and has_color_available:
+            current_idx = self._cameras[0][0]
+            log.info("Câmera padrão %d é IR/baixa luz; alternando automaticamente para câmera RGB (índice %d: %s)",
+                     self._svc.settings.camera.index, current_idx, self._cameras[0][1])
+            self._svc.settings.camera.index = current_idx
+            try:
+                self._svc.pipeline.set_camera_index(current_idx)
+                self._svc.settings.save(paths.CONFIG_FILE)
+            except Exception as exc:
+                log.warning("Falha ao salvar configuração: %s", exc)
+        else:
+            log.info("Fonte de câmera confirmada para execução: índice %d", current_idx)
 
+        cb_values = [label for _, label in self._cameras] if self._cameras else ["Nenhuma câmera"]
         self._cb_source = Combobox(
             source_row,
-            values=[label for _, label in self._cameras],
-            state="readonly",
-            width=18,
+            values=cb_values,
+            state="readonly" if self._cameras else "disabled",
+            width=28,
         )
         selected_idx = 0
         for i, (idx, _) in enumerate(self._cameras):
             if idx == current_idx:
                 selected_idx = i
                 break
-        self._cb_source.current(selected_idx)
+        if self._cameras:
+            self._cb_source.current(selected_idx)
         self._cb_source.bind("<<ComboboxSelected>>", self._on_source_changed)
         self._cb_source.pack(side="left")
+
+        self._btn_refresh = Button(
+            source_row,
+            text="🔄",
+            width=3,
+            command=self._on_refresh_cameras,
+            cursor="hand2",
+        )
+        self._btn_refresh.pack(side="left", padx=(6, 0))
 
         Label(left_col, text="STATUS DO SISTEMA", style="CardHeader.TLabel").pack(anchor="w", pady=(6, 4))
         self._status = Label(left_col, style="StatusWarn.TLabel")
@@ -155,12 +191,15 @@ class MainWindow:
         buttons = Frame(container, style="TFrame")
         buttons.pack(pady=(4, 12))
 
+        # Se não há câmeras conectadas, botões de ação iniciam desativados
+        btn_state = "normal" if self._cameras else "disabled"
         self._btn_play = Button(
             buttons,
             text="▶  Iniciar Rastreio",
             style="TButton",
             command=self._on_play,
             cursor="hand2",
+            state=btn_state,
         )
         self._btn_play.grid(row=0, column=0, padx=8, pady=4)
 
@@ -170,6 +209,7 @@ class MainWindow:
             style="Secondary.TButton",
             command=self._on_calibrate,
             cursor="hand2",
+            state=btn_state,
         )
         self._btn_cal.grid(row=0, column=1, padx=8, pady=4)
 
@@ -234,15 +274,15 @@ class MainWindow:
             self._cb_source.configure(state="disabled" if busy else "readonly")
 
     def _on_source_changed(self, _event=None) -> None:
-        if self._cb_source is None:
+        if self._cb_source is None or not self._cameras:
             return
         sel_idx = self._cb_source.current()
         if sel_idx < 0 or sel_idx >= len(self._cameras):
             return
         cam_idx, cam_label = self._cameras[sel_idx]
-        if cam_idx == self._svc.settings.camera.index:
+        if cam_idx == self._svc.settings.camera.index and self._preview is not None and self._preview.is_running:
             return
-        log.info("Fonte de captura alterada: %s (índice %d)", cam_label, cam_idx)
+        log.info("Fonte de captura selecionada pelo usuário: %s (índice %d)", cam_label, cam_idx)
         self._svc.settings.camera.index = cam_idx
         try:
             self._svc.pipeline.set_camera_index(cam_idx)
@@ -257,9 +297,48 @@ class MainWindow:
         except Exception as exc:
             log.warning("Falha ao salvar configuração: %s", exc)
 
+    def _on_refresh_cameras(self) -> None:
+        """Atualiza sob demanda a lista de fontes de captura detectadas (hotplug)."""
+        log.info("Atualização manual de fontes de captura solicitada pelo usuário.")
+        self._cameras = list_available_cameras()
+        cb_values = [label for _, label in self._cameras] if self._cameras else ["Nenhuma câmera"]
+        if self._cb_source is not None:
+            self._cb_source["values"] = cb_values
+            self._cb_source.configure(state="readonly" if self._cameras else "disabled")
+
+            current_idx = self._svc.settings.camera.index
+            found = False
+            for i, (idx, _) in enumerate(self._cameras):
+                if idx == current_idx:
+                    self._cb_source.current(i)
+                    found = True
+                    break
+            if not found and self._cameras:
+                self._cb_source.current(0)
+                new_idx = self._cameras[0][0]
+                self._svc.settings.camera.index = new_idx
+                try:
+                    self._svc.pipeline.set_camera_index(new_idx)
+                except Exception:
+                    pass
+                if self._preview is not None:
+                    self._preview.set_camera_index(new_idx)
+                try:
+                    self._svc.settings.save(paths.CONFIG_FILE)
+                except Exception:
+                    pass
+
+        if hasattr(self, "_btn_play") and self._btn_play is not None:
+            btn_state = "normal" if self._cameras else "disabled"
+            self._btn_play.configure(state=btn_state)
+            self._btn_cal.configure(state=btn_state)
+
     # ------------------------------------------------------------------- play
     def _on_play(self) -> None:
         if self._svc.pipeline.running:
+            return
+        if not self._cameras:
+            messagebox.showwarning("Aviso", "Nenhuma câmera conectada para iniciar o rastreio.")
             return
         if self._profile is None:
             messagebox.showwarning("Aviso", "Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
@@ -272,12 +351,9 @@ class MainWindow:
             calibration_luma=self._profile.calibration_luma,
             pixel_pitch_mm=pitch_mm,
         )
-        messagebox.showinfo("Aviso", "Para sair do rastreio ocular aperte ESC.\n"
-                                     "Clique: pisque só o olho esquerdo.\n"
-                                     "Pausar/retomar: feche os dois olhos por ~1,5 s.")
+        # Encerra o preview; Camera.open() já realiza retries com backoff em segundo plano
         if self._preview is not None:
             self._preview.stop()
-            time.sleep(0.05)
         try:
             self._svc.pipeline.start(session, stop_on_escape=True)
         except RuntimeError as exc:
@@ -316,6 +392,9 @@ class MainWindow:
     def _on_calibrate(self) -> None:
         if self._svc.pipeline.running:
             return
+        if not self._cameras:
+            messagebox.showwarning("Aviso", "Nenhuma câmera conectada para calibrar o sistema.")
+            return
         cfg = self._svc.settings.calibration
         targets, pose_start, hints = calibration_targets(self._svc.screen, cfg)
         session = CalibrationSession(targets, cfg, pose_start=pose_start, pose_hints=hints)
@@ -328,9 +407,9 @@ class MainWindow:
             else:
                 view.on_result(result)
 
+        # Encerra o preview; Camera.open() roda na thread de visão
         if self._preview is not None:
             self._preview.stop()
-            time.sleep(0.05)
         try:
             self._svc.pipeline.start(None)
         except RuntimeError as exc:

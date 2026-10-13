@@ -20,6 +20,9 @@ from lorena.vision.camera import Camera
 from lorena.vision.face_detector import FaceLandmarkDetector
 from lorena.vision.gaze_features import GazeFeatureExtractor, OpennessModel
 
+log = logging.getLogger(__name__)
+
+
 
 def configure_logging() -> None:
     paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,6 +40,7 @@ def main() -> None:
     settings = Settings.load(paths.CONFIG_FILE)
     if not paths.CONFIG_FILE.exists():
         settings.save(paths.CONFIG_FILE)  # gera o arquivo editável com os padrões
+    log.info("Iniciando L.O.R.E.N.A. — Configuração carregada (câmera índice=%d)", settings.camera.index)
 
     pipeline = TrackingPipeline(
         camera=Camera(settings.camera),

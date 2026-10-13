@@ -32,44 +32,80 @@ class Camera:
             return
         # No Windows, Media Foundation (MSMF) decodifica por hardware e entrega 30+ FPS,
         # enquanto DirectShow (DSHOW) força YUY2 e cai para 10-14 FPS por limite de largura de banda USB.
-        backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY] if sys.platform == "win32" else [cv2.CAP_ANY]
+        # Priorizamos MSMF em todas as tentativas antes de permitir qualquer fallback para DSHOW.
         cap = None
-        for backend in backends:
-            c = cv2.VideoCapture(self._s.index, backend)
-            if c.isOpened():
-                # No Windows MSMF, as propriedades PRECISAM ser definidas antes da primeira
-                # leitura de quadro, caso contrário o MSMF falha ao tentar reconfigurar o stream.
-                try:
-                    c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-                except Exception:
-                    pass
-                c.set(cv2.CAP_PROP_FRAME_WIDTH, self._s.width)
-                c.set(cv2.CAP_PROP_FRAME_HEIGHT, self._s.height)
-                c.set(cv2.CAP_PROP_FPS, self._s.fps)
-                c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        max_attempts = 3
 
-                try:
-                    ok, test_frame = c.read()
-                    if ok and test_frame is not None:
-                        cap = c
-                        break
-                except Exception:
-                    pass
-            c.release()
-
-        # Fallback defensivo: se a câmera rejeitou 720p/MJPG, tenta abrir na resolução padrão do driver
-        if cap is None:
-            for backend in backends:
-                c = cv2.VideoCapture(self._s.index, backend)
+        if sys.platform == "win32":
+            # 1. Tentar prioritariamente Media Foundation (MSMF) em todas as tentativas com backoff
+            for attempt in range(max_attempts):
+                c = cv2.VideoCapture(self._s.index, cv2.CAP_MSMF)
                 if c.isOpened():
+                    try:
+                        c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    except Exception:
+                        pass
+                    c.set(cv2.CAP_PROP_FRAME_WIDTH, self._s.width)
+                    c.set(cv2.CAP_PROP_FRAME_HEIGHT, self._s.height)
+                    c.set(cv2.CAP_PROP_FPS, self._s.fps)
+                    c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
                     try:
                         ok, test_frame = c.read()
                         if ok and test_frame is not None:
                             cap = c
                             break
-                    except Exception:
+                    except (cv2.error, Exception):
                         pass
                 c.release()
+
+                if attempt < max_attempts - 1:
+                    log.debug("Aguardando liberação do MSMF para câmera %d (tentativa %d/%d)...",
+                              self._s.index, attempt + 1, max_attempts)
+                    time.sleep(0.15)
+
+            # 2. Fallback defensivo para DirectShow ou genérico se MSMF falhar todas as tentativas
+            if cap is None:
+                log.warning("MSMF indisponível para câmera %d; tentando backends secundários (DSHOW/ANY)...", self._s.index)
+                for backend in [cv2.CAP_DSHOW, cv2.CAP_ANY]:
+                    c = cv2.VideoCapture(self._s.index, backend)
+                    if c.isOpened():
+                        try:
+                            c.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                        except Exception:
+                            pass
+                        c.set(cv2.CAP_PROP_FRAME_WIDTH, self._s.width)
+                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, self._s.height)
+                        c.set(cv2.CAP_PROP_FPS, self._s.fps)
+                        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+                        try:
+                            ok, test_frame = c.read()
+                            if ok and test_frame is not None:
+                                cap = c
+                                break
+                        except (cv2.error, Exception):
+                            pass
+                    c.release()
+        else:
+            # Plataformas não-Windows (Linux / macOS)
+            for attempt in range(max_attempts):
+                c = cv2.VideoCapture(self._s.index, cv2.CAP_ANY)
+                if c.isOpened():
+                    c.set(cv2.CAP_PROP_FRAME_WIDTH, self._s.width)
+                    c.set(cv2.CAP_PROP_FRAME_HEIGHT, self._s.height)
+                    c.set(cv2.CAP_PROP_FPS, self._s.fps)
+                    c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    try:
+                        ok, test_frame = c.read()
+                        if ok and test_frame is not None:
+                            cap = c
+                            break
+                    except (cv2.error, Exception):
+                        pass
+                c.release()
+                if attempt < max_attempts - 1:
+                    time.sleep(0.15)
 
         if cap is None or not cap.isOpened():
             raise CameraError(f"Não foi possível abrir a câmera {self._s.index}.")
@@ -77,8 +113,9 @@ class Camera:
         real_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         real_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         real_fps = float(cap.get(cv2.CAP_PROP_FPS))
-        log.info("Câmera %d aberta: %dx%d a %.1f FPS (solicitado %dx%d a %d FPS)",
-                 self._s.index, real_w, real_h, real_fps, self._s.width, self._s.height, self._s.fps)
+        backend_name = cap.getBackendName() if hasattr(cap, "getBackendName") else "Desconhecido"
+        log.info("Câmera %d aberta via backend %s: %dx%d a %.1f FPS (solicitado %dx%d a %d FPS)",
+                 self._s.index, backend_name, real_w, real_h, real_fps, self._s.width, self._s.height, self._s.fps)
         if real_w < 1280 or real_h < 720:
             log.warning("Câmera operando abaixo de 720p (%dx%d); a precisão do rastreio nos cantos pode ser reduzida.",
                         real_w, real_h)
@@ -107,7 +144,7 @@ class Camera:
                 break
             try:
                 ok, frame = cap.read()
-            except Exception as exc:
+            except (cv2.error, Exception) as exc:
                 log.debug("Exceção na captura do frame: %s", exc)
                 ok, frame = False, None
 
@@ -172,6 +209,7 @@ class Camera:
         if self._cap is not None:
             raise CameraError("Não é possível alterar a fonte com a câmera aberta.")
         self._s.index = index
+        log.info("Câmera: índice alterado para %d", index)
 
     def __enter__(self) -> "Camera":
         self.open()
@@ -186,7 +224,8 @@ def list_available_cameras(max_tested: int = 4) -> list[tuple[int, str]]:
     
     Analisa os quadros de teste para diferenciar câmeras coloridas (RGB) de
     sensores infravermelhos (ex: Windows Hello, imagem preta/ruído), priorizando
-    as câmeras de cor no topo da lista.
+    as câmeras de cor no topo da lista sem descartar outras fontes funcionais.
+    Interrompe a busca logo na primeira falha contígua para não bloquear a UI.
     """
     import contextlib
     import os
@@ -218,6 +257,7 @@ def list_available_cameras(max_tested: int = 4) -> list[tuple[int, str]]:
     with _suppress_c_stderr():
         for idx in range(max_tested):
             cap = None
+            initial_frame = None
             for backend in backends:
                 try:
                     c = cv2.VideoCapture(idx, backend)
@@ -228,32 +268,42 @@ def list_available_cameras(max_tested: int = 4) -> list[tuple[int, str]]:
                         ok, test_frame = c.read()
                         if ok and test_frame is not None:
                             cap = c
+                            initial_frame = test_frame
                             break
                     c.release()
                 except Exception:
                     pass
 
-            if cap is not None and cap.isOpened():
-                try:
-                    ok, test_frame = cap.read()
-                    if ok and test_frame is not None:
-                        mean_val = float(test_frame.mean())
-                        is_color = False
-                        if test_frame.ndim == 3 and test_frame.shape[2] == 3:
-                            diff_rg = float(np.abs(test_frame[:, :, 0].astype(float) - test_frame[:, :, 1].astype(float)).mean())
-                            diff_rb = float(np.abs(test_frame[:, :, 0].astype(float) - test_frame[:, :, 2].astype(float)).mean())
-                            is_color = (diff_rg > 1.0 or diff_rb > 1.0)
+            if cap is None or initial_frame is None:
+                # Índices no Windows e Linux são atribuídos de forma contígua a partir de 0.
+                # Se este índice falhou em todos os backends, interrompe imediatamente para não bloquear a UI.
+                break
 
-                        # Exclui sensores infravermelhos (ex: Windows Hello, imagem preta/ruído)
-                        # e fontes sem iluminação utilizável para rastreamento ocular
-                        if mean_val > 8.0 and (is_color or mean_val > 15.0):
-                            color_cams.append((idx, f"Câmera {idx}"))
-                except Exception:
-                    pass
-                finally:
-                    cap.release()
+            try:
+                mean_val = float(initial_frame.mean())
+                is_color = False
+                if initial_frame.ndim == 3 and initial_frame.shape[2] == 3:
+                    # Subamostragem 8x8 para variância instantânea (< 0.05 ms) sem alocações pesadas
+                    sample = initial_frame[::8, ::8, :].astype(np.int16)
+                    # Padrão BGR do OpenCV: canal 0=Blue, canal 1=Green, canal 2=Red
+                    diff_bg = float(np.abs(sample[:, :, 0] - sample[:, :, 1]).mean())
+                    diff_br = float(np.abs(sample[:, :, 0] - sample[:, :, 2]).mean())
+                    diff_gr = float(np.abs(sample[:, :, 1] - sample[:, :, 2]).mean())
+                    is_color = max(diff_bg, diff_br, diff_gr) > 1.5
 
-    if not color_cams:
-        color_cams.append((0, "Câmera 0"))
-    return color_cams
+                if mean_val > 8.0 and is_color:
+                    color_cams.append((idx, f"Câmera {idx} (RGB / Colorida)"))
+                elif mean_val <= 8.0:
+                    other_cams.append((idx, f"Câmera {idx} (Sensor IR ou Tampa Fechada)"))
+                else:
+                    other_cams.append((idx, f"Câmera {idx} (Sensor Monocromático)"))
+            except Exception:
+                pass
+            finally:
+                cap.release()
+
+    res = color_cams + other_cams
+    if not res:
+        res.append((0, "Câmera 0"))
+    return res
 
