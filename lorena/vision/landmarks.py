@@ -12,6 +12,10 @@ LEFT_EYE_CORNERS = (362, 263)    # olho esquerdo do usuário: interno, externo
 RIGHT_EYE_EAR = (33, 160, 158, 133, 153, 144)
 LEFT_EYE_EAR = (362, 385, 387, 263, 373, 380)
 
+# Pálpebra superior (centro) para a feature de abertura vertical.
+RIGHT_UPPER_LID = 159
+LEFT_UPPER_LID = 386
+
 # Centros de íris (a atribuição a cada olho é verificada por proximidade).
 IRIS_CENTERS = (468, 473)
 IRIS_RING_A = (469, 470, 471, 472)

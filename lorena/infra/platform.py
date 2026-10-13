@@ -34,13 +34,14 @@ def configure_tkinter_environment() -> None:
         if not base.exists():
             continue
         try:
-            tcl_dirs = list(base.glob("**/tcl/tcl8*")) + list(base.glob("tcl/tcl8*"))
-            if tcl_dirs:
-                tcl_path = tcl_dirs[0]
-                os.environ.setdefault("TCL_LIBRARY", str(tcl_path))
-                tk_path = tcl_path.parent / f"tk{tcl_path.name.replace('tcl', '')}"
-                if tk_path.exists():
-                    os.environ.setdefault("TK_LIBRARY", str(tk_path))
+            tcl_candidates = list(base.rglob("init.tcl"))
+            if tcl_candidates:
+                tcl_path = tcl_candidates[0].parent
+                os.environ["TCL_LIBRARY"] = str(tcl_path).replace("\\", "/")
+                parent = tcl_path.parent
+                tk_candidates = [p for p in parent.glob("tk8*") if p.is_dir()]
+                if tk_candidates:
+                    os.environ["TK_LIBRARY"] = str(tk_candidates[0]).replace("\\", "/")
                 break
         except Exception:
             continue
@@ -74,6 +75,38 @@ def screen_size() -> tuple[int, int]:
     size = root.winfo_screenwidth(), root.winfo_screenheight()
     root.destroy()
     return size
+
+
+def screen_physical_mm() -> tuple[float, float]:
+    """Tamanho físico (largura, altura) da tela principal em milímetros."""
+    if IS_WINDOWS:
+        try:
+            u = ctypes.windll.user32
+            g = ctypes.windll.gdi32
+            hdc = u.GetDC(0)
+            w_mm = float(g.GetDeviceCaps(hdc, 4))  # HORZSIZE
+            h_mm = float(g.GetDeviceCaps(hdc, 6))  # VERTSIZE
+            u.ReleaseDC(0, hdc)
+            if w_mm > 50 and h_mm > 50:
+                return w_mm, h_mm
+        except Exception:
+            pass
+    # Fallback assumindo 96 DPI padrão
+    w_px, h_px = screen_size()
+    return float(w_px * 25.4 / 96.0), float(h_px * 25.4 / 96.0)
+
+
+def screen_pixel_pitch_mm() -> float:
+    """Tamanho médio de um pixel na tela em milímetros."""
+    w_px, h_px = screen_size()
+    w_mm, h_mm = screen_physical_mm()
+    if w_px > 0 and h_px > 0 and w_mm > 0 and h_mm > 0:
+        pitch_x = w_mm / w_px
+        pitch_y = h_mm / h_px
+        avg = (pitch_x + pitch_y) / 2.0
+        if 0.10 <= avg <= 0.50:
+            return float(avg)
+    return float(25.4 / 96.0)
 
 
 class HotkeyListener:

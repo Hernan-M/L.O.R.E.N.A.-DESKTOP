@@ -20,10 +20,11 @@ class CalibrationProfile:
     screen_size: tuple[int, int]
     report: CalibrationReport
     created_at: float = field(default_factory=time.time)
+    calibration_luma: float | None = None
 
 
 class CalibrationRepository:
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, directory: Path) -> None:
         self._dir = directory
@@ -38,6 +39,7 @@ class CalibrationRepository:
             "created_at": profile.created_at,
             "screen_size": list(profile.screen_size),
             "open_ear": {"left": profile.open_ear_left, "right": profile.open_ear_right},
+            "calibration_luma": profile.calibration_luma,
             "report": asdict(profile.report),
             "mapper": profile.mapper.to_dict(),
         }
@@ -64,6 +66,7 @@ class CalibrationRepository:
                 screen_size=(int(d["screen_size"][0]), int(d["screen_size"][1])),
                 report=CalibrationReport(**report),
                 created_at=float(d.get("created_at", 0.0)),
+                calibration_luma=float(d["calibration_luma"]) if d.get("calibration_luma") is not None else None,
             )
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("Perfil de calibração inválido em %s: %s", path, exc)

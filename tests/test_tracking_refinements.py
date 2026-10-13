@@ -9,7 +9,7 @@ from lorena.vision.face_detector import enhance_contrast_adaptive
 
 def test_mapper_head_pose_fit_and_predict():
     mapper = GazeMapper(degree=2, ridge_lambda=1e-5, use_head_pose=True, screen_size=(1920, 1080))
-    assert mapper.num_terms == 8  # 6 termos de grau 2 + 2 termos de pose (yaw, pitch)
+    assert mapper.num_terms == 10  # 6 termos de grau 2 + 4 termos de pose (yaw, pitch, hx, hy)
 
     # 9 alvos na tela
     xs = [100.0, 960.0, 1820.0]

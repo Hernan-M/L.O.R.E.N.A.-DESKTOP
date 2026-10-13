@@ -44,10 +44,18 @@ class OneEuroFilter:
         return self._x
 
 
+    def set_min_cutoff(self, min_cutoff: float) -> None:
+        self.min_cutoff = min_cutoff
+
+
 class OneEuroFilter2D:
     def __init__(self, min_cutoff: float, beta: float, d_cutoff: float) -> None:
         self._fx = OneEuroFilter(min_cutoff, beta, d_cutoff)
         self._fy = OneEuroFilter(min_cutoff, beta, d_cutoff)
+
+    def set_min_cutoff(self, min_cutoff: float) -> None:
+        self._fx.set_min_cutoff(min_cutoff)
+        self._fy.set_min_cutoff(min_cutoff)
 
     def reset(self) -> None:
         self._fx.reset()
@@ -61,6 +69,7 @@ class OutlierGate:
     """Segura saltos grandes até que se confirmem por ``confirm_frames`` frames.
 
     Uma sacada real se mantém no novo local; um erro de detecção é isolado.
+    Aceita deslocamento conhecido (``shift``, p. ex. por pose da cabeça).
     """
 
     def __init__(self, jump_px: float, confirm_frames: int) -> None:
@@ -71,10 +80,12 @@ class OutlierGate:
         self._ref: np.ndarray | None = None
         self._pending: list[np.ndarray] = []
 
-    def __call__(self, p: np.ndarray) -> np.ndarray:
+    def __call__(self, p: np.ndarray, shift: np.ndarray | None = None) -> np.ndarray:
         if self._ref is None:
             self._ref = p
             return p
+        if shift is not None:
+            self._ref = self._ref + shift
         if np.linalg.norm(p - self._ref) <= self.jump_px:
             self._pending.clear()
             self._ref = p

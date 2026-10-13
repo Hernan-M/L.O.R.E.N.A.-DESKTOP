@@ -103,6 +103,8 @@ class TrackingPipeline:
                 fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
 
                 features = self.extractor.extract(detector.detect(frame, t))
+                if features is not None and hasattr(self._camera, "update_exposure") and features.face_luma > 0:
+                    self._camera.update_exposure(features.face_luma, t)
                 status = consumer.on_frame(features, t) if consumer is not None else None
 
                 if stop_on_escape and hotkey.pressed():

@@ -46,9 +46,12 @@ def test_main_window_camera_select(tmp_path):
 
         # Simula troca de câmera
         if len(win._cameras) > 1:
-            win._cb_source.current(1)
+            # Seleciona uma câmera diferente da selecionada inicialmente
+            current_cb = win._cb_source.current()
+            new_cb = 0 if current_cb != 0 else 1
+            win._cb_source.current(new_cb)
             win._on_source_changed()
-            target_idx = win._cameras[1][0]
+            target_idx = win._cameras[new_cb][0]
             assert settings.camera.index == target_idx
             mock_pipeline.set_camera_index.assert_called_with(target_idx)
             assert win._preview.camera_index == target_idx

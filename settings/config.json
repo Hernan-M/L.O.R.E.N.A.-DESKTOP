@@ -3,7 +3,9 @@
     "index": 1,
     "width": 1280,
     "height": 720,
-    "fps": 30
+    "fps": 30,
+    "exposure_control": "off",
+    "target_face_luma": 120.0
   },
   "detector": {
     "min_detection_confidence": 0.5,
@@ -24,7 +26,14 @@
     "min_quality": 0.5,
     "polynomial_degree": 2,
     "ridge_lambda": 0.001,
-    "use_head_pose": true
+    "use_head_pose": true,
+    "use_lid": true,
+    "auto_select": true,
+    "margin_frac": 0.04,
+    "pose_pass": true,
+    "pose_min_deg": 2.5,
+    "pose_timeout_s": 6.0,
+    "max_spread_frac": 0.35
   },
   "filters": {
     "min_cutoff": 0.8,
@@ -32,7 +41,19 @@
     "d_cutoff": 1.0,
     "jump_px": 260.0,
     "confirm_frames": 3,
-    "fixation_radius_px": 45.0
+    "fixation_radius_px": 45.0,
+    "jump_deg": 6.0,
+    "fixation_radius_deg": 1.0,
+    "viewing_distance_mm": 600.0,
+    "adaptive_noise": true,
+    "noise_ref_deg": 0.1,
+    "edge_frac": 0.05,
+    "edge_deadzone_scale": 0.6,
+    "head_rate_deg_s": 60.0,
+    "head_hold_s": 0.1,
+    "kinematic_prediction": true,
+    "lead_time_s": 0.02,
+    "saccade_velocity_threshold": 80.0
   },
   "blink": {
     "click_eye": "left",
@@ -52,7 +73,19 @@
     "click_mode": "wink",
     "dwell_s": 1.2,
     "lost_after_s": 0.5,
-    "degraded_quality": 0.6
+    "degraded_quality": 0.6,
+    "luma_drift_frac": 0.35,
+    "luma_drift_s": 3.0
+  },
+  "magnifier": {
+    "enabled": true,
+    "trigger_dwell_s": 1.5,
+    "charge_dwell_s": 1.0,
+    "zoom_factor": 2.2,
+    "lens_radius_px": 130,
+    "ease_duration_ms": 180,
+    "escape_margin_px": 60.0,
+    "mode": "zoom_and_click"
   },
   "profile": "default"
 }

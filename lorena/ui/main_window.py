@@ -14,14 +14,16 @@ from lorena import paths
 from lorena.config import Settings
 from lorena.domain.models import FrameResult
 from lorena.infra.calibration_repo import CalibrationProfile, CalibrationRepository
+from lorena.infra.platform import screen_pixel_pitch_mm
 from lorena.mapping.gaze_mapper import GazeMapper
-from lorena.services.calibration import CalibrationSession, Phase, grid_targets
+from lorena.services.calibration import CalibrationSession, Phase, calibration_targets, grid_targets
 from lorena.services.cursor import Cursor
 from lorena.services.cursor_session import CursorSession
 from lorena.services.tracking_pipeline import TrackingPipeline
 from lorena.ui import theme
 from lorena.ui.calibration_view import CalibrationView
 from lorena.ui.camera_preview import CameraPreview
+from lorena.ui.magnifier_lens import MagnifierLens
 from lorena.ui.status_overlay import StatusOverlay
 from lorena.vision.camera import list_available_cameras
 
@@ -47,6 +49,7 @@ class MainWindow:
         self._profile: CalibrationProfile | None = None
         self._listener: Callable[[FrameResult], None] | None = None
         self._overlay = StatusOverlay(root, services.screen)
+        self._lens = MagnifierLens(root, services.screen, services.settings.magnifier)
         self._cameras: list[tuple[int, str]] = []
         self._cb_source: Combobox | None = None
         self._preview: CameraPreview | None = None
@@ -108,8 +111,18 @@ class MainWindow:
 
         self._cameras = list_available_cameras()
         current_idx = self._svc.settings.camera.index
-        if not any(idx == current_idx for idx, _ in self._cameras):
-            self._cameras.insert(0, (current_idx, f"Câmera {current_idx}"))
+        if not any(idx == current_idx for idx, _ in self._cameras) and self._cameras:
+            current_idx = self._cameras[0][0]
+            self._svc.settings.camera.index = current_idx
+            try:
+                self._svc.pipeline.set_camera_index(current_idx)
+            except Exception:
+                pass
+            try:
+                self._svc.settings.save(paths.CONFIG_FILE)
+                log.info("Configuração atualizada com fonte padrão válida: índice %d", current_idx)
+            except Exception as exc:
+                log.warning("Falha ao salvar configuração: %s", exc)
 
         self._cb_source = Combobox(
             source_row,
@@ -251,12 +264,20 @@ class MainWindow:
         if self._profile is None:
             messagebox.showwarning("Aviso", "Calibre o sistema ao menos uma vez antes de iniciar o rastreio.")
             return
-        session = CursorSession(self._profile.mapper, self._svc.cursor, self._svc.settings)
+        pitch_mm = screen_pixel_pitch_mm()
+        session = CursorSession(
+            self._profile.mapper,
+            self._svc.cursor,
+            self._svc.settings,
+            calibration_luma=self._profile.calibration_luma,
+            pixel_pitch_mm=pitch_mm,
+        )
         messagebox.showinfo("Aviso", "Para sair do rastreio ocular aperte ESC.\n"
                                      "Clique: pisque só o olho esquerdo.\n"
                                      "Pausar/retomar: feche os dois olhos por ~1,5 s.")
         if self._preview is not None:
             self._preview.stop()
+            time.sleep(0.05)
         try:
             self._svc.pipeline.start(session, stop_on_escape=True)
         except RuntimeError as exc:
@@ -277,11 +298,15 @@ class MainWindow:
             self._stop_tracking()
         else:
             self._overlay.update(result.status, result.fps, time.monotonic())
+            if self._lens is not None and result.status is not None:
+                self._lens.update(result.status.magnifier)
 
     def _stop_tracking(self) -> None:
         self._listener = None
         self._svc.pipeline.stop()
         self._overlay.hide()
+        if self._lens is not None:
+            self._lens.hide()
         self._set_busy(False)
         self._root.deiconify()
         if self._preview is not None:
@@ -292,7 +317,8 @@ class MainWindow:
         if self._svc.pipeline.running:
             return
         cfg = self._svc.settings.calibration
-        session = CalibrationSession(grid_targets(self._svc.screen, cfg.grid, cfg.margin_px), cfg)
+        targets, pose_start, hints = calibration_targets(self._svc.screen, cfg)
+        session = CalibrationSession(targets, cfg, pose_start=pose_start, pose_hints=hints)
         view = CalibrationView(self._root, session, self._svc.screen, self._on_calibration_finished)
 
         def listener(result: FrameResult) -> None:
@@ -304,6 +330,7 @@ class MainWindow:
 
         if self._preview is not None:
             self._preview.stop()
+            time.sleep(0.05)
         try:
             self._svc.pipeline.start(None)
         except RuntimeError as exc:
@@ -328,20 +355,30 @@ class MainWindow:
                                          "Verifique a iluminação e a distância da câmera.")
             return
         cfg = self._svc.settings.calibration
-        mapper = GazeMapper(cfg.polynomial_degree, cfg.ridge_lambda, cfg.use_head_pose, self._svc.screen)
+        mapper = GazeMapper(
+            degree=cfg.polynomial_degree,
+            ridge_lambda=cfg.ridge_lambda,
+            use_head_pose=cfg.use_head_pose,
+            screen_size=self._svc.screen,
+            use_lid=getattr(cfg, "use_lid", False),
+            auto_select=getattr(cfg, "auto_select", False),
+        )
         try:
-            report = mapper.fit(session.samples)
+            report = mapper.fit(session.samples, pose_ref=session.pose_ref)
         except (ValueError, ArithmeticError) as exc:
             log.exception("Falha no ajuste da calibração")
             messagebox.showerror("Erro", f"Falha ao calcular a calibração: {exc}")
             return
         open_left, open_right = session.open_ear_baseline() or (None, None)
+        luma = session.face_luma_baseline()
+        report.face_luma = luma
         profile = CalibrationProfile(
             mapper=mapper,
             open_ear_left=open_left or self._svc.settings.blink.default_open_ear,
             open_ear_right=open_right or self._svc.settings.blink.default_open_ear,
             screen_size=self._svc.screen,
             report=report,
+            calibration_luma=luma,
         )
         self._svc.repository.save(self._svc.settings.profile, profile)
         self._set_profile(profile)

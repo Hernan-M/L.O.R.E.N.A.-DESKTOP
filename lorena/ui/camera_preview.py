@@ -27,6 +27,9 @@ POLL_INTERVAL_MS = 60  # ~16 FPS de atualização na interface
 @contextlib.contextmanager
 def _suppress_c_stderr():
     """Suprime mensagens de baixo nível de drivers no Windows."""
+    if "pytest" in sys.modules:
+        yield
+        return
     try:
         devnull = os.open(os.devnull, os.O_WRONLY)
         stderr_fd = 2
@@ -149,11 +152,19 @@ class CameraPreview(Frame):
             for backend in backends:
                 if self._stop_event.is_set():
                     return
-                cap = cv2.VideoCapture(self._camera_index, backend)
-                if cap.isOpened():
-                    break
-                cap.release()
-                cap = None
+                try:
+                    c = cv2.VideoCapture(self._camera_index, backend)
+                    if c.isOpened():
+                        c.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        ok, test_frame = c.read()
+                        if ok and test_frame is not None:
+                            cap = c
+                            break
+                    c.release()
+                except Exception:
+                    pass
 
         if cap is None or not cap.isOpened():
             log.info("Preview: câmera %d indisponível ou em uso.", self._camera_index)
@@ -161,15 +172,14 @@ class CameraPreview(Frame):
                 self.after(0, lambda: self._show_placeholder("Sem sinal"))
             return
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
         target_delay = 1.0 / 15.0
         try:
             while not self._stop_event.is_set():
                 t0 = time.monotonic()
-                ok, frame = cap.read()
+                try:
+                    ok, frame = cap.read()
+                except Exception:
+                    ok, frame = False, None
                 if ok and frame is not None:
                     # Espelhado horizontalmente para experiência amigável de webcam
                     mirrored = cv2.flip(frame, 1)
