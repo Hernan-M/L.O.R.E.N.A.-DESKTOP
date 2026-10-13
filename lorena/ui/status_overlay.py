@@ -25,7 +25,7 @@ _EVENT_TEXT = {
 
 
 class StatusOverlay:
-    WIDTH, HEIGHT = 340, 74
+    WIDTH, HEIGHT = 380, 74
 
     def __init__(self, root: tk.Tk, screen: tuple[int, int]) -> None:
         self._win = tk.Toplevel(root)
@@ -55,6 +55,12 @@ class StatusOverlay:
         if status is None:
             return
         text, color = _STATE_TEXT.get(status.state, ("", theme.FG))
+        if getattr(status, "hint", None) == "camera_reconnecting":
+            text, color = "Câmera sem sinal — reconectando...", theme.ERROR
+        elif getattr(status, "hint", None) == "head":
+            text, color = "Cabeça muito virada — volte ao centro", theme.WARN
+        elif getattr(status, "hint", None) == "light":
+            text, color = "Iluminação mudou — recomenda-se recalibrar", theme.WARN
         if status.last_event in _EVENT_TEXT:
             self._event_text, self._event_until = _EVENT_TEXT[status.last_event], now + 0.8
         if now < self._event_until:

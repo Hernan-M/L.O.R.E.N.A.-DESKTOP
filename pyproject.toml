@@ -22,3 +22,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "unit: testes unitários rápidos de modelos matemáticos e domínio puro",
+    "integration: testes de integração de pipeline, controladores e serviços",
+    "ui: testes de interface gráfica Tkinter com ciclo de vida isolado",
+    "hardware: testes que validam integração ou mock com subsistemas de hardware (câmera, Win32)",
+    "slow: testes com execução intensiva de cálculos ou simulação temporal prolongada",
+]
+

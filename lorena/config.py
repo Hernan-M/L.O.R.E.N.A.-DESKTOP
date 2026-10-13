@@ -19,6 +19,8 @@ class CameraSettings:
     width: int = 1280
     height: int = 720
     fps: int = 30
+    exposure_control: Literal["auto", "off"] = "off"   # desligado por padrão para evitar flashes/sparks no sensor da câmera
+    target_face_luma: float = 120.0                       # luminância alvo do rosto (0-255)
 
 
 @dataclass
@@ -44,6 +46,13 @@ class CalibrationSettings:
     polynomial_degree: int = 2
     ridge_lambda: float = 1e-3
     use_head_pose: bool = True
+    use_lid: bool = True           # feature de pálpebra superior (compensa íris ocluída ao olhar p/ baixo)
+    auto_select: bool = True       # escolhe grau/λ/termos por Leave-One-Out
+    margin_frac: float = 0.04      # margem dos alvos como fração do lado menor (0 = usa margin_px)
+    pose_pass: bool = True         # 2º passe: 5 pontos com a cabeça virada (identifica o efeito da cabeça)
+    pose_min_deg: float = 2.5      # giro mínimo de cabeça exigido no 2º passe
+    pose_timeout_s: float = 6.0    # aceita o ponto com o maior giro obtido após esse tempo
+    max_spread_frac: float = 0.35  # dispersão máxima como fração da faixa já observada de h/v
 
 
 @dataclass
@@ -54,6 +63,20 @@ class FilterSettings:
     jump_px: float = 260.0         # salto considerado suspeito (outlier gate)
     confirm_frames: int = 3        # frames consistentes para aceitar um salto
     fixation_radius_px: float = 45.0
+    # Unidades relativas ao ângulo visual (escalam com o tamanho físico da tela). Se > 0, têm
+    # prioridade sobre os valores em pixels acima (mantidos por compatibilidade).
+    jump_deg: float = 6.0
+    fixation_radius_deg: float = 1.0
+    viewing_distance_mm: float = 600.0
+    adaptive_noise: bool = True    # One Euro suaviza mais quando o sinal está ruidoso (pouca luz)
+    noise_ref_deg: float = 0.1     # ruído de referência (jitter mediano entre frames)
+    edge_frac: float = 0.05        # faixa de borda onde a zona morta diminui
+    edge_deadzone_scale: float = 0.6
+    head_rate_deg_s: float = 60.0  # giro de cabeça mais rápido que isso congela o cursor
+    head_hold_s: float = 0.10
+    kinematic_prediction: bool = True     # Projeção preditiva cinemática (elimina atraso de captura)
+    lead_time_s: float = 0.020            # Tempo de avanço preditivo (~20 ms compensa sensor USB)
+    saccade_velocity_threshold: float = 80.0 # Velocidade mínima (px/s) para ativar avanço
 
 
 @dataclass
@@ -78,6 +101,20 @@ class TrackingSettings:
     dwell_s: float = 1.2
     lost_after_s: float = 0.5
     degraded_quality: float = 0.6
+    luma_drift_frac: float = 0.35  # variação relativa de luz vs. calibração que dispara o aviso
+    luma_drift_s: float = 3.0
+
+
+@dataclass
+class MagnifierSettings:
+    enabled: bool = True
+    trigger_dwell_s: float = 1.5       # Tempo de fixação contínua para abrir a lupa
+    charge_dwell_s: float = 1.0        # Início do anel de pré-ativação da lupa
+    zoom_factor: float = 2.2           # Fator de ampliação (2.0x a 3.0x)
+    lens_radius_px: int = 130          # Raio da lente circular na tela
+    ease_duration_ms: int = 180        # Duração da animação ease-in/ease-out em ms
+    escape_margin_px: float = 60.0     # Tolerância fora da lente para fechar
+    mode: Literal["zoom_and_click", "inspect"] = "zoom_and_click"
 
 
 @dataclass
@@ -88,6 +125,7 @@ class Settings:
     filters: FilterSettings = field(default_factory=FilterSettings)
     blink: BlinkSettings = field(default_factory=BlinkSettings)
     tracking: TrackingSettings = field(default_factory=TrackingSettings)
+    magnifier: MagnifierSettings = field(default_factory=MagnifierSettings)
     profile: str = "default"
 
     @classmethod

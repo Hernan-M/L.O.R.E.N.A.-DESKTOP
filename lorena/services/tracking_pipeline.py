@@ -12,7 +12,7 @@ import time
 from collections import deque
 from typing import Callable, Protocol
 
-from lorena.domain.models import FrameResult, GazeFeatures, SessionStatus
+from lorena.domain.models import FrameResult, GazeFeatures, SessionStatus, TrackingState
 from lorena.infra.platform import HotkeyListener
 from lorena.vision.camera import Camera
 from lorena.vision.gaze_features import GazeFeatureExtractor
@@ -30,7 +30,7 @@ class Detector(Protocol):
 
 
 class TrackingPipeline:
-    MAX_READ_FAILURES = 30
+    MAX_READ_FAILURES = 90  # ~3 segundos a 30 FPS / 0.033s por ciclo de reconexão
 
     def __init__(self, camera: Camera, detector_factory: Callable[[], Detector], extractor: GazeFeatureExtractor,
                  results_maxsize: int = 64) -> None:
@@ -88,21 +88,38 @@ class TrackingPipeline:
         failures = 0
         try:
             self._camera.open()
+            log.info("TrackingPipeline: câmera %d aberta com sucesso para rastreio.", self._camera._s.index)
             detector = self._detector_factory()
             while not self._stop.is_set():
-                frame = self._camera.read()
+                try:
+                    frame = self._camera.read()
+                except Exception as exc:
+                    log.warning("Falha temporária na leitura do quadro da câmera: %s", exc)
+                    frame = None
+
                 if frame is None:
                     failures += 1
+                    if failures == 1:
+                        log.warning("TrackingPipeline: perda de sinal da câmera. Tentando reconectar...")
+                    # Notifica a UI e overlay sobre tentativa de reconexão
+                    reconnect_status = SessionStatus(state=TrackingState.LOST, hint="camera_reconnecting")
+                    self._publish(FrameResult(time.monotonic(), None, 0.0, status=reconnect_status))
                     if failures >= self.MAX_READ_FAILURES:
-                        raise RuntimeError("Falha ao capturar imagem da webcam.")
-                    time.sleep(0.01)
+                        raise RuntimeError("Câmera desconectada: sinal de vídeo perdido por mais de 3 segundos.")
+                    time.sleep(0.033)
                     continue
                 failures = 0
                 t = time.monotonic()
                 frame_times.append(t)
                 fps = (len(frame_times) - 1) / (frame_times[-1] - frame_times[0]) if len(frame_times) > 1 else 0.0
 
-                features = self.extractor.extract(detector.detect(frame, t))
+                try:
+                    features = self.extractor.extract(detector.detect(frame, t))
+                except Exception as exc:
+                    log.warning("Exceção na extração de features: %s", exc)
+                    features = None
+                if features is not None and hasattr(self._camera, "update_exposure") and features.face_luma > 0:
+                    self._camera.update_exposure(features.face_luma, t)
                 status = consumer.on_frame(features, t) if consumer is not None else None
 
                 if stop_on_escape and hotkey.pressed():

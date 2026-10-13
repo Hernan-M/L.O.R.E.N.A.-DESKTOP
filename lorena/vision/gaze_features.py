@@ -9,8 +9,8 @@ Para cada olho, com cantos C_s→C_e (esquerda→direita da imagem) e íris I:
 * Vertical normalizada pela LARGURA do olho (estável), não pela altura (que
   muda com a pálpebra).
 * Projeção no eixo do olho compensa roll e distância da câmera.
-* Os dois olhos são combinados com peso proporcional à abertura: se um falha
-  ou fecha, o outro assume.
+* Os dois olhos são combinados com peso proporcional à abertura × largura²: se um falha
+  ou fecha, o outro assume, e o olho mais distante/encurtado (mais ruidoso) pesa menos.
 """
 from __future__ import annotations
 
@@ -32,6 +32,20 @@ def eye_ratios(iris: np.ndarray, start: np.ndarray, end: np.ndarray) -> tuple[fl
     return h, v
 
 
+def eye_lid(upper_lid: np.ndarray, start: np.ndarray, end: np.ndarray) -> float | None:
+    """Posição vertical (assinada) da pálpebra superior em relação ao eixo do olho, / largura.
+
+    Acompanha o olhar para baixo (a pálpebra desce junto) e compensa a oclusão parcial da
+    íris, que faz o landmark da íris ser "puxado" para cima nos cantos inferiores da tela.
+    """
+    axis = end - start
+    width = float(np.linalg.norm(axis))
+    if width < 1e-6:
+        return None
+    u = axis / width
+    n = np.array([-u[1], u[0]])
+    return float(np.dot(upper_lid - (start + end) / 2.0, n) / width)
+
 class OpennessModel:
     """Converte EAR bruto em abertura normalizada [0, 1] por olho e por usuário."""
 
@@ -50,6 +64,8 @@ class OpennessModel:
 
 
 class GazeFeatureExtractor:
+    MIN_EYE_PX = 18.0  # olho mais estreito que isso (em px) reduz a qualidade
+
     def __init__(self, openness: OpennessModel) -> None:
         self.openness = openness
 
@@ -59,31 +75,48 @@ class GazeFeatureExtractor:
         o_left = self.openness.openness(face.left_eye.ear, self.openness.open_left)
         o_right = self.openness.openness(face.right_eye.ear, self.openness.open_right)
 
-        acc_h = acc_v = acc_w = 0.0
-        for eye, weight in ((face.left_eye, o_left), (face.right_eye, o_right)):
+        # Peso binocular = abertura × largura² (variância do ruído cai com o quadrado da largura).
+        acc_h = acc_v = acc_w = acc_o = acc_wpx = 0.0
+        lid_sum = lid_w = 0.0
+        for eye, openness in ((face.left_eye, o_left), (face.right_eye, o_right)):
             ratios = self._ratios(eye)
-            if ratios is None or weight <= 0.0:
+            if ratios is None or openness <= 0.0:
                 continue
+            width = float(np.linalg.norm(eye.end_corner - eye.start_corner))
+            weight = openness * width * width
             acc_h += weight * ratios[0]
             acc_v += weight * ratios[1]
             acc_w += weight
-        if acc_w <= 1e-6:
+            acc_o += openness
+            acc_wpx += openness * width
+            if eye.upper_lid is not None:
+                lid = eye_lid(eye.upper_lid, eye.start_corner, eye.end_corner)
+                if lid is not None:
+                    lid_sum += weight * lid
+                    lid_w += weight
+        common = dict(yaw=face.yaw, pitch=face.pitch, head_x=face.head_x, head_y=face.head_y,
+                      head_z=face.head_z, face_luma=face.luma)
+        if acc_o <= 1e-6:
             # Olhos fechados: ainda devolvemos aberturas (necessárias para a piscada).
             return GazeFeatures(face.timestamp, float("nan"), float("nan"), face.yaw, face.pitch,
-                                face.left_eye.ear, face.right_eye.ear, o_left, o_right, 0.0)
+                                face.left_eye.ear, face.right_eye.ear, o_left, o_right, 0.0,
+                                head_x=face.head_x, head_y=face.head_y, head_z=face.head_z, face_luma=face.luma)
 
-        quality = float(np.clip(max(o_left, o_right) * 0.5 + min(o_left, o_right) * 0.5, 0.0, 1.0))
+        eye_px = acc_wpx / acc_o
+        size_factor = float(np.clip(eye_px / self.MIN_EYE_PX, 0.0, 1.0))
+        quality = float(np.clip(max(o_left, o_right) * 0.5 + min(o_left, o_right) * 0.5, 0.0, 1.0)) * size_factor
         return GazeFeatures(
             timestamp=face.timestamp,
             h=acc_h / acc_w,
             v=acc_v / acc_w,
-            yaw=face.yaw,
-            pitch=face.pitch,
             ear_left=face.left_eye.ear,
             ear_right=face.right_eye.ear,
             openness_left=o_left,
             openness_right=o_right,
             quality=quality,
+            lid=lid_sum / lid_w if lid_w > 0 else 0.0,
+            eye_px=eye_px,
+            **common,
         )
 
     @staticmethod

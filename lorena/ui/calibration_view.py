@@ -57,10 +57,21 @@ class CalibrationView:
             if i != v.index:
                 c.create_oval(x - 8, y - 8, x + 8, y + 8, fill=color, width=0)
 
-        title = "Olhe fixamente para o ponto azul até ele ficar verde. ESC cancela."
+        if v.pose_hint:
+            title = f"Passe 2: Vire levemente a cabeça para {v.pose_hint} e olhe para o alvo"
+        else:
+            title = "Olhe fixamente para o ponto azul até ele ficar verde. ESC cancela."
         c.create_text(w // 2, int(h * 0.22), text=title, font=(theme.FONT, 20), fill="#1b2a38")
+
         if v.phase is Phase.WAIT_FACE or not v.face_ok:
             status, color = "Rosto não identificado — alinhe-se com a câmera e mantenha os olhos abertos", theme.ERROR
+        elif v.pose_hint:
+            if v.pose_dev_deg < v.pose_min_deg:
+                status = f"Ponto {v.index + 1} de {v.total} • Giro da cabeça: {v.pose_dev_deg:.1f}° (mínimo {v.pose_min_deg:.1f}° — vire um pouco mais)"
+                color = "#d97706"
+            else:
+                status = f"Ponto {v.index + 1} de {v.total} • Giro: {v.pose_dev_deg:.1f}° ✓ — mantenha e fixe o olhar"
+                color = "#00a37a"
         else:
             status, color = f"Ponto {v.index + 1} de {v.total}" + (f"  (repetindo {v.retry})" if v.retry else ""), "#1b6d8c"
         c.create_text(w // 2, int(h * 0.22) + 44, text=status, font=(theme.FONT, 16), fill=color)
