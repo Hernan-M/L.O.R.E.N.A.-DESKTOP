@@ -41,8 +41,18 @@ class CursorSession:
         self._fix_radius = f.fixation_radius_deg * ppd if f.fixation_radius_deg > 0 else f.fixation_radius_px
         self._noise_ref_px = max(f.noise_ref_deg * ppd, 1.0)
         self._gate = OutlierGate(jump_px, f.confirm_frames)
-        self._euro = OneEuroFilter2D(f.min_cutoff, f.beta, f.d_cutoff)
-        self._stabilizer = FixationStabilizer(self._fix_radius)
+        self._euro = OneEuroFilter2D(
+            f.min_cutoff,
+            f.beta,
+            f.d_cutoff,
+            isotropic=getattr(f, "isotropic_smoothing", True),
+        )
+        self._stabilizer = FixationStabilizer(
+            self._fix_radius,
+            smooth=getattr(f, "smooth_deadzone", True),
+            break_mult=getattr(f, "break_deadzone_mult", 2.5),
+            catchup_rate=getattr(f, "catchup_rate", 0.25),
+        )
         self._dwell = DwellClicker(settings.tracking.dwell_s)
         self._blink = BlinkDetector(settings.blink)
         self._magnifier = MagnifierController(settings.magnifier) if getattr(settings, "magnifier", None) else None
@@ -51,6 +61,10 @@ class CursorSession:
         self._last_seen: float | None = None
         self._state = TrackingState.TRACKING
         self._paused = False
+        self._blink_freeze_frames = 0
+        self._freeze_confirm_frames = getattr(f, "freeze_confirm_frames", 2)
+        self._buf_euro = np.zeros(2, dtype=float)
+        self._buf_dispatch = np.zeros(2, dtype=float)
         # --- cabeça / ruído / luz ---
         self._prev: GazeFeatures | None = None
         self._hold_until = 0.0
@@ -82,6 +96,7 @@ class CursorSession:
         self._vel_filtered = np.zeros(2, dtype=float)
         self._last_filt_p = None
         self._last_filt_t = None
+        self._blink_freeze_frames = 0
 
     def on_frame(self, f: GazeFeatures | None, t: float) -> SessionStatus:
         mode = self._s.tracking.click_mode
@@ -115,13 +130,26 @@ class CursorSession:
 
         # --- congelamento durante o gesto ----------------------------------
         if self._blink.freeze:
-            if self._frozen_at is None:
-                self._frozen_at = self._history.at(t - self._s.blink.freeze_rollback_s)
-                if self._frozen_at is not None:
-                    self._cursor.move_to(self._frozen_at)
-            return SessionStatus(self._state, 0.0, None)
+            self._blink_freeze_frames += 1
+            freeze_elapsed = t - getattr(self._blink, "_t0", t)
+            confirmed = (self._blink_freeze_frames >= self._freeze_confirm_frames) or (freeze_elapsed >= 0.050)
+            if confirmed:
+                if self._frozen_at is None:
+                    self._frozen_at = self._history.at(t - self._s.blink.freeze_rollback_s)
+                    if self._frozen_at is not None:
+                        self._cursor.move_to(self._frozen_at)
+                return SessionStatus(self._state, 0.0, None)
+            else:
+                # Quadro candidato (1º quadro): segura o cursor imóvel sem mover para a distorção da pálpebra
+                return SessionStatus(self._state, 0.0, None)
+        else:
+            self._blink_freeze_frames = 0
 
         if event is not None:
+            # Fallback de rollback se ainda não congelado (ex.: quedas de FPS ou gesture rápido)
+            if self._frozen_at is None:
+                self._frozen_at = self._history.at(t - self._s.blink.freeze_rollback_s)
+
             # Se a lupa estiver ativa no momento do clique (Zoom-and-Click):
             if (self._magnifier is not None and self._magnifier.state is MagnifierState.ACTIVE
                     and getattr(self._s.magnifier, "mode", "zoom_and_click") == "zoom_and_click"):
@@ -134,7 +162,8 @@ class CursorSession:
                 if self._frozen_at is not None:
                     self._cursor.move_to(self._frozen_at)
                 self._cursor.click("right" if event is GestureEvent.RIGHT_CLICK else "left")
-        self._frozen_at = None
+            self._frozen_at = None
+            return SessionStatus(self._state, 0.0, event)
 
         # --- movimento -------------------------------------------------------
         if not (math.isfinite(f.h) and math.isfinite(f.v)):
@@ -154,7 +183,7 @@ class CursorSession:
         prev, self._prev = self._prev, f
         if t < self._hold_until:
             self._gate.reset()  # após o giro, o novo ponto é a nova referência
-            self._vel_filtered = np.zeros(2, dtype=float)
+            self._vel_filtered.fill(0.0)
             self._last_filt_p = None
             self._last_filt_t = None
             return SessionStatus(self._state, 0.0, event, hint)
@@ -163,7 +192,7 @@ class CursorSession:
         self._update_noise(p_raw)
         shift = self._mapper.pose_shift(prev, f) if prev is not None else None
         p = self._gate(p_raw, shift)
-        p = self._euro(p, t)
+        p = self._euro(p, t, out=self._buf_euro)
         self._stabilizer.radius_px = self._fix_radius * (flt.edge_deadzone_scale if self._near_edge(p) else 1.0)
         p = self._stabilizer(p, t)
 
@@ -175,27 +204,29 @@ class CursorSession:
             if self._last_filt_p is not None and self._last_filt_t is not None:
                 dt = t - self._last_filt_t
                 if 1e-4 <= dt <= 0.5:
-                    inst_vel = (p - self._last_filt_p) / dt
-                    self._vel_filtered = 0.6 * inst_vel + 0.4 * self._vel_filtered
+                    inst_vel_x = (float(p[0]) - float(self._last_filt_p[0])) / dt
+                    inst_vel_y = (float(p[1]) - float(self._last_filt_p[1])) / dt
+                    self._vel_filtered[0] = 0.6 * inst_vel_x + 0.4 * self._vel_filtered[0]
+                    self._vel_filtered[1] = 0.6 * inst_vel_y + 0.4 * self._vel_filtered[1]
                 else:
-                    self._vel_filtered = np.zeros(2, dtype=float)
+                    self._vel_filtered.fill(0.0)
             else:
-                self._vel_filtered = np.zeros(2, dtype=float)
+                self._vel_filtered.fill(0.0)
             self._last_filt_p = p.copy()
             self._last_filt_t = t
 
-            speed = float(np.linalg.norm(self._vel_filtered))
+            speed = math.hypot(self._vel_filtered[0], self._vel_filtered[1])
             v_thresh = getattr(flt, "saccade_velocity_threshold", 80.0)
             if speed > v_thresh:
                 v_full = v_thresh * 3.0
                 lead_s = getattr(flt, "lead_time_s", 0.020)
                 w = float(np.clip((speed - v_thresh) / max(v_full - v_thresh, 1.0), 0.0, 1.0))
-                p_proj = p + self._vel_filtered * (lead_s * w)
+                p_proj_x = float(p[0]) + self._vel_filtered[0] * (lead_s * w)
+                p_proj_y = float(p[1]) + self._vel_filtered[1] * (lead_s * w)
                 w_screen, h_screen = self._mapper.screen_size
-                p_dispatch = np.array([
-                    np.clip(p_proj[0], 0.0, float(w_screen - 1)),
-                    np.clip(p_proj[1], 0.0, float(h_screen - 1)),
-                ], dtype=float)
+                self._buf_dispatch[0] = float(np.clip(p_proj_x, 0.0, float(w_screen - 1)))
+                self._buf_dispatch[1] = float(np.clip(p_proj_y, 0.0, float(h_screen - 1)))
+                p_dispatch = self._buf_dispatch
         else:
             self._last_filt_p = p.copy()
             self._last_filt_t = t
@@ -234,7 +265,9 @@ class CursorSession:
         """One Euro adaptativo: mais ruído (pouca luz) → corte menor → mais suavização."""
         flt = self._s.filters
         if self._last_raw is not None:
-            self._jitter.append(float(np.linalg.norm(p_raw - self._last_raw)))
+            dx = float(p_raw[0] - self._last_raw[0])
+            dy = float(p_raw[1] - self._last_raw[1])
+            self._jitter.append(math.hypot(dx, dy))
         self._last_raw = p_raw
         if flt.adaptive_noise and len(self._jitter) >= 8:
             noise = float(np.median(self._jitter))  # mediana ignora as sacadas reais
