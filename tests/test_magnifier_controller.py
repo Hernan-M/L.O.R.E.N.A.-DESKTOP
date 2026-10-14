@@ -140,3 +140,91 @@ def test_magnifier_dismiss_and_reset():
     controller.dismiss()
     assert controller.state == MagnifierState.IDLE
     assert controller.center is None
+
+
+def test_magnifier_aim_dwell_fired_click():
+    settings = MagnifierSettings(
+        enabled=True,
+        trigger_dwell_s=1.0,
+        aim_dwell_s=0.7,
+        lens_radius_px=160,
+    )
+    controller = MagnifierController(settings)
+    stabilizer = FixationStabilizer(radius_px=45.0)
+
+    center = np.array([500.0, 500.0])
+
+    # 1. Ativa a lupa em t=1.0s
+    stabilizer(center, 0.0)
+    status_act = controller.update(stabilizer, center, 1.0)
+    assert status_act.state == MagnifierState.ACTIVE
+    assert status_act.aim_progress == pytest.approx(0.0)
+    assert not status_act.fired_click
+
+    # 2. Metade do aim dwell (t=1.35s -> 0.35s após ativação)
+    status_half = controller.update(stabilizer, center, 1.35)
+    assert status_half.state == MagnifierState.ACTIVE
+    assert status_half.aim_progress == pytest.approx(0.5, abs=0.05)
+    assert not status_half.fired_click
+
+    # 3. Completa o aim dwell (t=1.70s -> 0.70s após ativação)
+    status_click = controller.update(stabilizer, center, 1.70)
+    assert status_click.state == MagnifierState.ACTIVE
+    assert status_click.aim_progress == pytest.approx(1.0)
+    assert status_click.fired_click
+
+    # 4. Próximo frame (t=1.75s): não repete o disparo
+    status_next = controller.update(stabilizer, center, 1.75)
+    assert not status_next.fired_click
+
+
+def test_magnifier_corner_clamping_exact_mapping():
+    settings = MagnifierSettings(
+        enabled=True,
+        trigger_dwell_s=0.5,
+        zoom_factor=2.0,
+        lens_radius_px=160,
+    )
+    controller = MagnifierController(settings, screen_size=(1920, 1080))
+    stabilizer = FixationStabilizer(radius_px=45.0)
+
+    # Ponto no canto superior esquerdo (20, 20)
+    corner = np.array([20.0, 20.0])
+    stabilizer(corner, 0.0)
+    status = controller.update(stabilizer, corner, 0.6)
+
+    assert status.state == MagnifierState.ACTIVE
+    # A janela 320x320 deve ser clampeada na borda (0, 0)
+    assert controller.window_pos == (0, 0)
+    assert controller.roi_center is not None
+
+    # Mira na posição (160, 160) da tela (que é exatamente o centro da janela da lente)
+    gaze_center_lens = np.array([160.0, 160.0])
+    target = controller.map_to_real_screen(gaze_center_lens)
+    # Deve mapear exatamente para roi_center
+    assert target[0] == pytest.approx(controller.roi_center[0])
+    assert target[1] == pytest.approx(controller.roi_center[1])
+
+
+def test_magnifier_wide_saccade_instant_escape():
+    settings = MagnifierSettings(
+        enabled=True,
+        trigger_dwell_s=0.5,
+        lens_radius_px=100,
+        escape_margin_px=50.0,  # escape radius = 150 px; 2.5x = 375 px
+    )
+    controller = MagnifierController(settings)
+    stabilizer = FixationStabilizer(radius_px=45.0)
+
+    center = np.array([500.0, 500.0])
+    stabilizer(center, 0.0)
+    controller.update(stabilizer, center, 0.6)
+    assert controller.state == MagnifierState.ACTIVE
+
+    # Sacada ampla instantânea para (900, 500), dist = 400 px > 375 px
+    saccade_pt = np.array([900.0, 500.0])
+    status = controller.update(stabilizer, saccade_pt, 0.65)
+    # Deve fechar imediatamente no primeiríssimo frame sem aguardar 250 ms
+    assert status.state == MagnifierState.IDLE
+    assert controller.state == MagnifierState.IDLE
+

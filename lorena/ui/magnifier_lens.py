@@ -1,7 +1,8 @@
-"""Lente de Aumento Inteligente (Assistive Zoom Lens) com animações Ease-In e Ease-Out.
+"""Lente de Aumento Inteligente (Assistive Zoom Lens 2.0) com Live ROI e Animações Fluidas.
 
-Exibe um overlay circular não-bloqueante sobre a região de fixação com ampliação
-(Zoom-and-Click), permitindo mira de alta precisão em micro-alvos (15.6" e botões pequenos).
+Exibe um overlay circular não-bloqueante expandido (diâmetro 320 px) com Live Viewport a 10 FPS,
+animações cúbicas Ease-In e Ease-Out suaves (220 ms), mira com retículo gravitacional e
+anel verde de confirmação de clique desacoplado.
 """
 from __future__ import annotations
 
@@ -28,10 +29,11 @@ log = logging.getLogger(__name__)
 
 IS_WINDOWS = sys.platform == "win32"
 TRANSPARENT_COLOR = "#000001"
+AIM_PROGRESS_COLOR = "#00e676"  # Verde esmeralda de confirmação de mira
 
 
 class MagnifierLens:
-    """Overlay visual flutuante para a Lupa Inteligente (Zoom-and-Click)."""
+    """Overlay visual flutuante para a Lupa Inteligente (Zoom-and-Click 2.0)."""
 
     def __init__(
         self,
@@ -72,6 +74,7 @@ class MagnifierLens:
         self._cached_roi_rgba: Image.Image | None = None
         self._current_photo: ImageTk.PhotoImage | None = None
         self._anim_job: str | None = None
+        self._live_job: str | None = None
         self._is_opening = False
         self._is_closing = False
         self._is_fully_open = False
@@ -106,12 +109,12 @@ class MagnifierLens:
                 self._redraw_active(status)
 
     def _draw_charging_ring(self, status: MagnifierStatus) -> None:
-        """Exibe o anel de pré-engate da lupa (1.0s a 1.5s de fixação contínua)."""
+        """Exibe o anel de pré-engate da lupa com animação radial."""
         if self._is_opening or self._is_fully_open or status.center is None:
             return
 
         cx, cy = status.center
-        ring_r = 28
+        ring_r = 30
         ring_d = ring_r * 2
         wx = int(cx - ring_r)
         wy = int(cy - ring_r)
@@ -124,11 +127,11 @@ class MagnifierLens:
         self._win.lift()
 
         self._canvas.delete("all")
-        # Anel de fundo translúcido
+        # Anel de fundo escuro translúcido
         self._canvas.create_oval(
             3, 3, ring_d - 3, ring_d - 3, outline="#17344d", width=3
         )
-        # Arco de progresso (0 a 359 graus)
+        # Arco de progresso azul (0 a 359 graus)
         extent = max(1.0, min(359.0, status.charge_progress * 359.0))
         self._canvas.create_arc(
             3,
@@ -143,7 +146,7 @@ class MagnifierLens:
         )
 
     def _open_lens(self, status: MagnifierStatus) -> None:
-        """Inicia a captura da tela e animação Ease-In."""
+        """Inicia a captura inicial da tela e animação fluida Ease-In."""
         if status.center is None:
             return
 
@@ -152,10 +155,12 @@ class MagnifierLens:
         cx, cy = self._center
         self._diameter = int(status.lens_radius_px * 2)
 
-        # Clampeamento da janela para não sair da tela
         sw, sh = self._screen
-        self._win_x = max(0, min(sw - self._diameter, int(cx - self._diameter // 2)))
-        self._win_y = max(0, min(sh - self._diameter, int(cy - self._diameter // 2)))
+        if status.window_pos is not None:
+            self._win_x, self._win_y = status.window_pos
+        else:
+            self._win_x = max(0, min(sw - self._diameter, int(cx - self._diameter // 2)))
+            self._win_y = max(0, min(sh - self._diameter, int(cy - self._diameter // 2)))
 
         self._win.geometry(
             f"{self._diameter}x{self._diameter}+{self._win_x}+{self._win_y}"
@@ -163,32 +168,68 @@ class MagnifierLens:
         self._win.deiconify()
         self._win.lift()
 
-        # Captura ultrarrápida do ROI na tela real
-        zoom = max(1.0, float(status.zoom_factor))
-        roi_size = max(32, int(round(self._diameter / zoom)))
-        roi_rgb = self._capture.capture_roi(
-            int(cx), int(cy), roi_size, roi_size, self._screen
-        )
-
-        # Converte para PIL e cria a máscara circular
-        roi_img = Image.fromarray(roi_rgb).resize(
-            (self._diameter, self._diameter), Image.BILINEAR
-        )
-        mask = Image.new("L", (self._diameter, self._diameter), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, self._diameter, self._diameter), fill=255)
-
-        roi_rgba = roi_img.convert("RGBA")
-        roi_rgba.putalpha(mask)
-        self._cached_roi_rgba = roi_rgba
+        # Captura inicial do ROI na tela real
+        self._capture_and_update_texture(status)
 
         self._is_opening = True
         self._is_closing = False
         self._is_fully_open = False
 
         duration = max(50, self._s.ease_duration_ms)
-        total_steps = max(4, duration // 16)
+        total_steps = max(6, duration // 16)
         self._step_ease_in(0, total_steps)
+
+    def _capture_and_update_texture(self, status: MagnifierStatus) -> None:
+        """Captura um frame da tela real centrada na ROI e cria a máscara circular."""
+        if status.center is None:
+            return
+
+        cx, cy = status.center
+        zoom = max(1.0, float(status.zoom_factor))
+        roi_size = max(32, int(round(self._diameter / zoom)))
+
+        try:
+            roi_rgb = self._capture.capture_roi(
+                int(cx), int(cy), roi_size, roi_size, self._screen
+            )
+            roi_img = Image.fromarray(roi_rgb).resize(
+                (self._diameter, self._diameter), Image.BILINEAR
+            )
+            mask = Image.new("L", (self._diameter, self._diameter), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.ellipse((0, 0, self._diameter, self._diameter), fill=255)
+
+            roi_rgba = roi_img.convert("RGBA")
+            roi_rgba.putalpha(mask)
+            self._cached_roi_rgba = roi_rgba
+        except Exception as exc:
+            log.debug("Erro ao capturar textura da tela: %s", exc)
+
+    def _start_live_refresh(self) -> None:
+        """Inicia o loop assíncrono de Live Viewport (10 FPS) via Tkinter after."""
+        self._cancel_live_refresh()
+        hz = getattr(self._s, "live_refresh_hz", 10.0)
+        if hz <= 0:
+            return
+        interval_ms = max(50, int(1000.0 / hz))
+        self._live_job = self._root.after(interval_ms, self._on_live_refresh_tick, interval_ms)
+
+    def _cancel_live_refresh(self) -> None:
+        if self._live_job is not None:
+            try:
+                self._root.after_cancel(self._live_job)
+            except Exception:
+                pass
+            self._live_job = None
+
+    def _on_live_refresh_tick(self, interval_ms: int) -> None:
+        self._live_job = None
+        if not self._is_fully_open or self._active_status is None:
+            return
+        if self._active_status.state is MagnifierState.ACTIVE:
+            self._capture_and_update_texture(self._active_status)
+            self._redraw_active(self._active_status)
+            self._live_job = self._root.after(interval_ms, self._on_live_refresh_tick, interval_ms)
 
     def _step_ease_in(self, step: int, total_steps: int) -> None:
         if not self._is_opening or self._cached_roi_rgba is None:
@@ -207,11 +248,13 @@ class MagnifierLens:
             self._is_opening = False
             self._is_fully_open = True
             self._anim_job = None
+            self._start_live_refresh()
             if self._active_status is not None:
                 self._redraw_active(self._active_status)
 
     def _start_ease_out(self) -> None:
         """Inicia animação suave Ease-Out de fechamento."""
+        self._cancel_live_refresh()
         if self._is_closing or self._cached_roi_rgba is None:
             self.hide()
             return
@@ -222,7 +265,7 @@ class MagnifierLens:
         self._is_closing = True
 
         duration = max(50, self._s.ease_duration_ms)
-        total_steps = max(4, duration // 16)
+        total_steps = max(6, duration // 16)
         self._step_ease_out(0, total_steps)
 
     def _step_ease_out(self, step: int, total_steps: int) -> None:
@@ -261,7 +304,7 @@ class MagnifierLens:
             offset, offset, anchor="nw", image=self._current_photo
         )
 
-        # Borda circular translúcida e elegante
+        # Borda circular translúcida e elegante em ciano
         self._canvas.create_oval(
             offset + 1,
             offset + 1,
@@ -271,14 +314,19 @@ class MagnifierLens:
             width=3,
         )
 
-        # Retículo central discreto quando a lente estiver aberta quase totalmente
+        # Retículo central discreto e botão "✕" de affordance de escape
         if scale > 0.8:
             mid = D // 2
+            # Retículo central branco discreto
             self._canvas.create_line(
                 mid - 6, mid, mid + 6, mid, fill="#ffffff", width=1
             )
             self._canvas.create_line(
                 mid, mid - 6, mid, mid + 6, fill="#ffffff", width=1
+            )
+            # Affordance visual de cancelamento no topo
+            self._canvas.create_text(
+                mid, 18, text="✕", fill="#90caf9", font=("Segoe UI", 9, "bold")
             )
 
     def _redraw_active(self, status: MagnifierStatus) -> None:
@@ -286,16 +334,41 @@ class MagnifierLens:
         if not self._is_fully_open or self._cached_roi_rgba is None:
             return
 
-        # Se houver alvo projetado ou olhar atual, podemos atualizar o retículo
         self._render_lens_frame(1.0)
         if status.real_target is not None and status.center is not None:
-            # Ponto de mira dentro da lente
             cx, cy = status.center
             rx, ry = status.real_target
-            # offset relativo à janela da lente
             zoom = status.zoom_factor
-            lx = (rx - cx) * zoom + self._diameter // 2
-            ly = (ry - cy) * zoom + self._diameter // 2
+
+            # Ponto de mira dentro da janela da lente
+            if status.window_pos is not None:
+                wx, wy = status.window_pos
+                lx = (rx - cx) * zoom + self._diameter // 2
+                ly = (ry - cy) * zoom + self._diameter // 2
+            else:
+                lx = (rx - cx) * zoom + self._diameter // 2
+                ly = (ry - cy) * zoom + self._diameter // 2
+
+            lx = max(10, min(self._diameter - 10, lx))
+            ly = max(10, min(self._diameter - 10, ly))
+
+            # Se houver progresso de dwell de mira, desenha o anel verde de clique
+            if status.aim_progress > 0.0:
+                aim_r = 16
+                extent = max(1.0, min(359.0, status.aim_progress * 359.0))
+                self._canvas.create_arc(
+                    lx - aim_r,
+                    ly - aim_r,
+                    lx + aim_r,
+                    ly + aim_r,
+                    start=90,
+                    extent=-extent,
+                    outline=AIM_PROGRESS_COLOR,
+                    style="arc",
+                    width=3,
+                )
+
+            # Ponto de mira central
             r_dot = 4
             self._canvas.create_oval(
                 lx - r_dot,
@@ -303,7 +376,7 @@ class MagnifierLens:
                 lx + r_dot,
                 ly + r_dot,
                 outline="#ffffff",
-                fill=theme.ACCENT,
+                fill=AIM_PROGRESS_COLOR if status.aim_progress >= 0.8 else theme.ACCENT,
                 width=1,
             )
 
@@ -314,6 +387,7 @@ class MagnifierLens:
             except Exception:
                 pass
             self._anim_job = None
+        self._cancel_live_refresh()
 
     def dismiss(self) -> None:
         """Fecha a lente suavemente com animação Ease-Out."""

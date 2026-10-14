@@ -108,12 +108,15 @@ class TrackingSettings:
 @dataclass
 class MagnifierSettings:
     enabled: bool = True
-    trigger_dwell_s: float = 1.5       # Tempo de fixação contínua para abrir a lupa
-    charge_dwell_s: float = 1.0        # Início do anel de pré-ativação da lupa
+    trigger_dwell_s: float = 1.0       # Tempo de fixação contínua para abrir a lupa
+    charge_dwell_s: float = 0.7        # Início do anel de pré-ativação da lupa
+    aim_dwell_s: float = 0.7           # Dwell dedicado de mira dentro da lente
     zoom_factor: float = 2.2           # Fator de ampliação (2.0x a 3.0x)
-    lens_radius_px: int = 130          # Raio da lente circular na tela
-    ease_duration_ms: int = 180        # Duração da animação ease-in/ease-out em ms
-    escape_margin_px: float = 60.0     # Tolerância fora da lente para fechar
+    lens_radius_px: int = 160          # Raio da lente expandido (diâmetro 320 px, +51% em área)
+    ease_duration_ms: int = 220        # Duração suave de ease-in/ease-out em ms
+    escape_margin_px: float = 70.0     # Tolerância fora da lente para fechar
+    live_refresh_hz: float = 10.0      # Taxa de atualização ao vivo (10 Hz = 100 ms)
+    escape_velocity_px_s: float = 120.0# Escape imediato por sacada rápida
     mode: Literal["zoom_and_click", "inspect"] = "zoom_and_click"
 
 

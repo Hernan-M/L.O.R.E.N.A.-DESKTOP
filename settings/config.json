@@ -1,6 +1,6 @@
 {
   "camera": {
-    "index": 1,
+    "index": 0,
     "width": 1280,
     "height": 720,
     "fps": 30,
@@ -79,12 +79,15 @@
   },
   "magnifier": {
     "enabled": true,
-    "trigger_dwell_s": 1.5,
-    "charge_dwell_s": 1.0,
+    "trigger_dwell_s": 1.0,
+    "charge_dwell_s": 0.7,
+    "aim_dwell_s": 0.7,
     "zoom_factor": 2.2,
-    "lens_radius_px": 130,
-    "ease_duration_ms": 180,
-    "escape_margin_px": 60.0,
+    "lens_radius_px": 160,
+    "ease_duration_ms": 220,
+    "escape_margin_px": 70.0,
+    "live_refresh_hz": 10.0,
+    "escape_velocity_px_s": 120.0,
     "mode": "zoom_and_click"
   },
   "profile": "default"

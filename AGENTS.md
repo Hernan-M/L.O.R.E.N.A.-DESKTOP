@@ -69,10 +69,11 @@ flowchart TD
     A["Fase 1: Diagnóstico e Prova de Conceito\n(scratch/, profiling e levantamento de restrições)"] --> B["Fase 2: Modelagem Matemática e Biomecânica\n(Paridade, ortogonalidade, variância mínima, latência)"]
     B --> C["Fase 3: Implementação Modular\n(Contratos tipados, sem bloqueios de thread, buffers reutilizáveis)"]
     C --> D["Fase 4: Testes Unitários e Validação\n(Mocks de hardware, pytest -q com 100% de sucesso)"]
-    D --> E{"A tarefa é Crítica?\n(Visão, Mapeamento, Pose, Threads, Filtros)"}
-    E -- Sim --> F["Fase 5: Execução do Protocolo de Tarefas Críticas\n(Relatório Técnico .md + Atualização do Plano + gitignore)"]
-    E -- Não --> G["Fim da Entrega"]
-    F --> G
+    D --> E["Fase 5: Auditoria de Código e Cleanup de Garbage\n(Python Auditor: Clean Code, SOLID, purga de build/ e dead code)"]
+    E --> F{"A tarefa é Crítica?\n(Visão, Mapeamento, Pose, Threads, Filtros)"}
+    F -- Sim --> G["Fase 6: Execução do Protocolo de Tarefas Críticas\n(Relatório Técnico .md + Atualização do Plano + gitignore)"]
+    F -- Não --> H["Fim da Entrega"]
+    G --> H
 ```
 
 ### Fase 1: Diagnóstico e Prova de Conceito
@@ -94,6 +95,18 @@ flowchart TD
 - Escrever testes automatizados em `tests/` cobrindo comportamento nominal, limites numéricos, casos de borda e regressão.
 - Seguir rigorosamente a arquitetura de testes em camadas, fixtures canônicas em `tests/conftest.py` e asserções com tolerâncias físicas (ver Seção 4).
 - Rodar a suíte completa com `.venv\Scripts\python -m pytest -q` e garantir 100% de aprovação (zero falhas e zero skips não autorizados).
+
+### Fase 5: Auditoria Contínua de Código e Cleanup de Garbage (Papel do Auditor)
+- **Atuação Obrigatória do Auditor (`python-auditor`):** Nenhum código é considerado pronto sem passar pela auditoria de conformidade estática, arquitetura DDD e limpeza profunda.
+- **Auditoria de Qualidade e Clean Code:**
+  - Garantir funções concisas ($\le 25$ linhas) com responsabilidade única (SRP) e no máximo 4 argumentos.
+  - Proibir categoricamente supressão silenciosa de exceções (`try...except: pass`).
+  - Auditar nomes de variáveis e funções para eliminar identificadores vagos (`data`, `temp`, `res`).
+  - Verificar a ausência de alocações transitórias em loops a 30 FPS.
+- **Cleanup Sistemático de Garbage Code e Resíduos de Build:**
+  - Purgar imediatamente artefatos de compilação ou empacotamento (`build/`, `dist/`, arquivos `.spec` obsoletos, `.egg-info`).
+  - Remover caches órfãos (`__pycache__`, `*.pyc`, logs de teste residuais).
+  - Identificar e remover dead code (imports não utilizados, funções mortas e experimentos abandonados em `scratch/`).
 
 
 ---
@@ -240,6 +253,12 @@ Antes de considerar qualquer alteração concluída, o agente deve auditar o có
   - Testes parametrizados possuem identificadores semânticos (`ids=[...]`)?
   - Nenhum trecho de código de produção altera seu comportamento verificando `"pytest" in sys.modules`?
   - Não há uso de `time.sleep()` arbitrário para sincronização de threads nos testes?
+- [ ] **Portão 6: Auditoria de Código Python & Cleanup de Garbage/Peso Morto**
+  - O código foi submetido ao crivo do Auditor (`python-auditor`)?
+  - Todos os resíduos de build (`build/`, `dist/`, arquivos `*.spec`, `.egg-info`) foram purgados?
+  - Foram removidos caches transitórios (`__pycache__`, `*.pyc`, `.pytest_cache`) e dead code não utilizado?
+  - Nenhuma exceção silenciosa (`try...except: pass`) foi introduzida?
+  - Funções respeitam tamanho conciso ($\le 25$ linhas) e nomes semânticos que revelam intenção?
 
 ---
 
@@ -283,4 +302,7 @@ Sempre que concluir uma Tarefa Crítica, o agente de I.A. **DEVE OBRIGATORIAMENT
 | **Bypass de Código de Produção (`if "pytest" in sys.modules`)** | Mascara gargalos de I/O e bugs de hardware no ambiente real | Injeção de dependência ou mocks via `monkeypatch` no teste |
 | **`time.sleep()` em Sincronização de Testes** | Testes lentos, imprevisíveis e falhas falsas em CI | Sincronização explícita com `threading.Event` ou timeouts curtos |
 | **Asserções Booleanas Genéricas (`assert res`)** | Falso sentimento de segurança sem validação métrica | `pytest.approx()` ou `np.allclose()` com tolerâncias explícitas |
+| **Resíduos de Build (`build/`, `dist/`, `*.spec`) Soltos no Repo** | Poluição do repositório, conflitos de versionamento e peso morto | Execução do cleanup pass pelo Auditor antes de concluir a task |
+| **Exceções Silenciosas (`try...except: pass`)** | Oculta travamentos e mascarar falhas críticas no pipeline | Tratamento com exceções tipadas e emissão de log explícito |
+| **Alocação de Objetos no Loop a 30 FPS** | Picos de pausa por Garbage Collection e queda de FPS | Reutilização de buffers NumPy e pré-alocação no `__init__` |
 

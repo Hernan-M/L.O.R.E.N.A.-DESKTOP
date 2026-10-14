@@ -45,7 +45,7 @@ class CursorSession:
         self._stabilizer = FixationStabilizer(self._fix_radius)
         self._dwell = DwellClicker(settings.tracking.dwell_s)
         self._blink = BlinkDetector(settings.blink)
-        self._magnifier = MagnifierController(settings.magnifier) if getattr(settings, "magnifier", None) else None
+        self._magnifier = MagnifierController(settings.magnifier, screen_size=mapper.screen_size) if getattr(settings, "magnifier", None) else None
         self._history = PositionHistory()
         self._frozen_at: np.ndarray | None = None
         self._last_seen: float | None = None
@@ -203,21 +203,26 @@ class CursorSession:
         self._cursor.move_to(p_dispatch)
         self._history.push(t, p)
 
-        # Atualiza a máquina de estados da Lupa
+        # Atualiza a máquina de estados da Lupa 2.0
         mag_status = self._magnifier.update(self._stabilizer, p, t) if self._magnifier is not None else None
 
+        # 1. Clique desacoplado por permanência dentro da Lupa Inteligente (Aim Dwell):
+        if mag_status is not None and mag_status.fired_click and event is None:
+            if mag_status.real_target is not None:
+                self._cursor.move_to(np.array(mag_status.real_target, dtype=float))
+            self._cursor.click("left")
+            self._magnifier.dismiss()
+            event = GestureEvent.DWELL_CLICK
+
+        # 2. Clique por permanência na tela principal (suspenso quando a lupa estiver ativa):
         if mode in ("dwell", "both"):
-            fired, dwell_progress = self._dwell.update(self._stabilizer, t)
-            if fired and event is None:
-                if (self._magnifier is not None and self._magnifier.state is MagnifierState.ACTIVE
-                        and getattr(self._s.magnifier, "mode", "zoom_and_click") == "zoom_and_click"):
-                    target = self._magnifier.map_to_real_screen(p)
-                    self._cursor.move_to(target)
+            if self._magnifier is not None and self._magnifier.state is MagnifierState.ACTIVE:
+                dwell_progress = mag_status.aim_progress if mag_status is not None else 0.0
+            else:
+                fired, dwell_progress = self._dwell.update(self._stabilizer, t)
+                if fired and event is None:
                     self._cursor.click("left")
-                    self._magnifier.dismiss()
-                else:
-                    self._cursor.click("left")
-                event = GestureEvent.DWELL_CLICK
+                    event = GestureEvent.DWELL_CLICK
 
         return SessionStatus(self._state, dwell_progress, event, hint, magnifier=mag_status)
 
