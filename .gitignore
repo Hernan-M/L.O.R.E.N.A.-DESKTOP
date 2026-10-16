@@ -170,6 +170,4 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Feature and technical reports
-reports/
-RELATORIO_TECNICO_CALCULOS_E_RASTREIO.md
+
