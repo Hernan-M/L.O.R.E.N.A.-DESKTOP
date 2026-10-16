@@ -32,7 +32,7 @@ def head_pose_from_matrix(matrix: np.ndarray | None) -> tuple[float, float, floa
         return 0.0, 0.0, 0.0
     r = np.asarray(matrix, dtype=float)[:3, :3]
     pitch = math.atan2(r[2, 1], r[2, 2])
-    yaw = math.asin(float(np.clip(-r[2, 0], -1.0, 1.0)))
+    yaw = math.atan2(-r[2, 0], math.hypot(r[2, 1], r[2, 2]))
     roll = math.atan2(r[1, 0], r[0, 0])
     return yaw, pitch, roll
 
@@ -47,6 +47,14 @@ def head_translation_from_matrix(matrix: np.ndarray | None) -> tuple[float, floa
     return float(t[0]), float(t[1]), float(abs(t[2]))
 
 
+def _cluster_centroid(pts: np.ndarray, cluster: tuple[int, ...], fallback_idx: int) -> np.ndarray:
+    """Centróide de 3 pontos para redução de variância, com fallback defensivo para landmark único."""
+    sub = pts[list(cluster)]
+    if np.any(np.all(np.abs(sub) < 1e-9, axis=1)) and not np.all(np.abs(pts[fallback_idx]) < 1e-9):
+        return pts[fallback_idx].copy()
+    return sub.mean(axis=0)
+
+
 def face_from_landmarks(points: np.ndarray, timestamp: float, matrix: np.ndarray | None = None) -> FaceObservation | None:
     """Monta um ``FaceObservation`` a partir de landmarks em pixels (N, 2).
 
@@ -55,17 +63,25 @@ def face_from_landmarks(points: np.ndarray, timestamp: float, matrix: np.ndarray
     if points.shape[0] < lm.NUM_LANDMARKS_WITH_IRIS:
         return None
 
-    def build(corners: tuple[int, int], ear_idx: tuple[int, ...], iris: np.ndarray, lid_idx: int) -> EyeObservation:
+    def build(start: np.ndarray, end: np.ndarray, ear_idx: tuple[int, ...], iris: np.ndarray, lid: np.ndarray) -> EyeObservation:
         return EyeObservation(
             iris=iris,
-            start_corner=points[corners[0]].copy(),
-            end_corner=points[corners[1]].copy(),
+            start_corner=start.copy(),
+            end_corner=end.copy(),
             ear=eye_aspect_ratio(points[list(ear_idx)]),
-            upper_lid=points[lid_idx].copy(),
+            upper_lid=lid.copy(),
         )
 
-    right_mid = (points[lm.RIGHT_EYE_CORNERS[0]] + points[lm.RIGHT_EYE_CORNERS[1]]) / 2
-    left_mid = (points[lm.LEFT_EYE_CORNERS[0]] + points[lm.LEFT_EYE_CORNERS[1]]) / 2
+    right_start = _cluster_centroid(points, lm.RIGHT_EYE_START_CLUSTER, lm.RIGHT_EYE_CORNERS[0])
+    right_end = _cluster_centroid(points, lm.RIGHT_EYE_END_CLUSTER, lm.RIGHT_EYE_CORNERS[1])
+    right_lid = _cluster_centroid(points, lm.RIGHT_UPPER_LID_CLUSTER, lm.RIGHT_UPPER_LID)
+
+    left_start = _cluster_centroid(points, lm.LEFT_EYE_START_CLUSTER, lm.LEFT_EYE_CORNERS[0])
+    left_end = _cluster_centroid(points, lm.LEFT_EYE_END_CLUSTER, lm.LEFT_EYE_CORNERS[1])
+    left_lid = _cluster_centroid(points, lm.LEFT_UPPER_LID_CLUSTER, lm.LEFT_UPPER_LID)
+
+    right_mid = (right_start + right_end) / 2.0
+    left_mid = (left_start + left_end) / 2.0
     # Estimador de variância mínima: fusão do centro da íris com os 4 pontos do anel
     # Var(C) = sigma^2 / 5 -> reduz a variância do ruído de captura em ~55%.
     if points.shape[0] >= lm.NUM_LANDMARKS_WITH_IRIS:
@@ -82,8 +98,8 @@ def face_from_landmarks(points: np.ndarray, timestamp: float, matrix: np.ndarray
     tx, ty, tz = head_translation_from_matrix(matrix)
     return FaceObservation(
         timestamp=timestamp,
-        left_eye=build(lm.LEFT_EYE_CORNERS, lm.LEFT_EYE_EAR, left_iris, lm.LEFT_UPPER_LID),
-        right_eye=build(lm.RIGHT_EYE_CORNERS, lm.RIGHT_EYE_EAR, right_iris, lm.RIGHT_UPPER_LID),
+        left_eye=build(left_start, left_end, lm.LEFT_EYE_EAR, left_iris, left_lid),
+        right_eye=build(right_start, right_end, lm.RIGHT_EYE_EAR, right_iris, right_lid),
         yaw=yaw,
         pitch=pitch,
         roll=roll,

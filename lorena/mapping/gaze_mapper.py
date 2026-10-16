@@ -104,10 +104,7 @@ class GazeMapper:
         h, v = z[:, 0], z[:, 1]
         cols = [np.ones(len(z)), h, v]
         if self.degree == 2:
-            if getattr(self, "basis", "symmetric") == "symmetric":
-                cols += [h * v, h * np.abs(h), v * np.abs(v)]
-            else:
-                cols += [h * v, h ** 2, v ** 2]
+            cols += [h * v, h * np.abs(h), v * np.abs(v)]
         for j in range(2, z.shape[1]):
             cols.append(z[:, j])
         return np.column_stack(cols)
@@ -174,64 +171,105 @@ class GazeMapper:
             diag[n_poly + n_lid:] = lam * self.pose_ridge_factor
         return np.diag(diag)
 
-    def _solve(self, raw: np.ndarray, targets: np.ndarray, lam: float, pose_ref: np.ndarray | None = None) -> None:
-        self._mu = raw.mean(axis=0)
-        self._sigma = raw.std(axis=0)
+    def _solve(self, raw: np.ndarray, targets: np.ndarray, idx: np.ndarray | None = None,
+               lam: float = 1e-3, pose_ref: np.ndarray | None = None) -> None:
+        if idx is None:
+            idx = np.arange(len(raw))
+        unique_pts = np.unique(idx)
+        k_pts = len(unique_pts)
+
+        # Centróides robustos por mediana coordenada a coordenada
+        raw_c = np.zeros((k_pts, raw.shape[1]), dtype=float)
+        tgt_c = np.zeros((k_pts, targets.shape[1]), dtype=float)
+        weights = np.zeros(k_pts, dtype=float)
+        for i, p in enumerate(unique_pts):
+            mask = (idx == p)
+            raw_c[i] = np.median(raw[mask], axis=0)
+            tgt_c[i] = np.median(targets[mask], axis=0)
+            if np.sum(mask) <= 1:
+                weights[i] = 1.0
+            else:
+                spread_i = float(np.median(np.linalg.norm(raw[mask, :2] - raw_c[i, :2], axis=1)))
+                weights[i] = 1.0 / max(spread_i, 1e-3)
+
+        w_norm = weights / max(float(np.mean(weights)), 1e-6)
+        w_mat = np.diag(w_norm)
+
+        self._mu = raw_c.mean(axis=0)
+        self._sigma = raw_c.std(axis=0)
         self._sigma[self._sigma < 1e-9] = 1.0
         if self.use_head_pose:
             pc = self._pose_col
-            self._mu[pc:pc + 4] = np.median(raw[:, pc:pc + 4], axis=0) if pose_ref is None else pose_ref
+            pass1_mask = unique_pts < 9
+            if k_pts > 9 and np.sum(pass1_mask) >= 5:
+                self._mu[pc:pc + 4] = np.median(raw_c[pass1_mask, pc:pc + 4], axis=0) if pose_ref is None else pose_ref
+            else:
+                self._mu[pc:pc + 4] = np.median(raw_c[:, pc:pc + 4], axis=0) if pose_ref is None else pose_ref
             self._sigma[pc:pc + 4] = POSE_SCALES
-        z = (raw - self._mu) / self._sigma
-        self._zmin, self._zmax = z[:, :2].min(axis=0), z[:, :2].max(axis=0)
+        z_c = (raw_c - self._mu) / self._sigma
+        self._zmin, self._zmax = z_c[:, :2].min(axis=0), z_c[:, :2].max(axis=0)
 
-        # Desacoplamento biomecânico em 2 estágios:
-        # Quando há variação de pose ativa, o modelo ocular puro é ajustado nas amostras de repouso,
-        # eliminando colinearidade e sobre-ajuste cruzado entre cabeça e olhos.
+        # Desacoplamento biomecânico em 2 estágios + 1 passo de refinamento alternado
         if self.use_head_pose:
             pc = self._pose_col
-            pose_dev = np.hypot(raw[:, pc] - self._mu[pc], raw[:, pc + 1] - self._mu[pc + 1])
-            at_rest = pose_dev < 0.035
+            pose_dev = np.hypot(raw_c[:, pc] - self._mu[pc], raw_c[:, pc + 1] - self._mu[pc + 1])
+            pass1_mask = unique_pts < 9
+            if k_pts > 9 and np.sum(pass1_mask) >= 5:
+                at_rest = pass1_mask | (pose_dev < 0.065)
+            else:
+                at_rest = pose_dev < 0.035
+            k_rest = int(np.sum(at_rest))
+            k_pose = int(np.sum(~at_rest))
+            p_eye = (3 if self.degree == 1 else 6) + (1 if self.use_lid else 0)
 
-            if np.sum(at_rest) >= 8 and np.sum(~at_rest) >= 2:
-                h_r, v_r = z[at_rest, 0], z[at_rest, 1]
+            span_x = float(np.ptp(tgt_c[at_rest, 0])) / max(self.screen_size[0], 1.0)
+            span_y = float(np.ptp(tgt_c[at_rest, 1])) / max(self.screen_size[1], 1.0)
+            spatial_cov_ok = (span_x >= 0.50 and span_y >= 0.50)
+
+            if k_rest >= p_eye + 2 and k_pose >= 2 and spatial_cov_ok:
+                h_r, v_r = z_c[at_rest, 0], z_c[at_rest, 1]
                 cols_r = [np.ones(len(h_r)), h_r, v_r]
                 if self.degree == 2:
-                    if getattr(self, "basis", "symmetric") == "symmetric":
-                        cols_r += [h_r * v_r, h_r * np.abs(h_r), v_r * np.abs(v_r)]
-                    else:
-                        cols_r += [h_r * v_r, h_r ** 2, v_r ** 2]
+                    cols_r += [h_r * v_r, h_r * np.abs(h_r), v_r * np.abs(v_r)]
                 if self.use_lid:
-                    cols_r.append(z[at_rest, 2])
-                X_eye_r = np.column_stack(cols_r)
+                    cols_r.append(z_c[at_rest, 2])
+                x_eye_r = np.column_stack(cols_r)
 
-                pen_eye = np.full(X_eye_r.shape[1], lam)
+                lam_eff = lam
+                pen_eye = np.full(x_eye_r.shape[1], lam_eff)
                 pen_eye[0] = 0.0
-                beta_eye = np.linalg.solve(X_eye_r.T @ X_eye_r + np.diag(pen_eye), X_eye_r.T @ targets[at_rest])
+                w_r = np.diag(w_norm[at_rest])
+                mat_r = x_eye_r.T @ w_r @ x_eye_r + np.diag(pen_eye)
+                cond = float(np.linalg.cond(mat_r))
+                while cond >= 500.0 and lam_eff < 1.0:
+                    lam_eff *= 10.0
+                    pen_eye = np.full(x_eye_r.shape[1], lam_eff)
+                    pen_eye[0] = 0.0
+                    mat_r = x_eye_r.T @ w_r @ x_eye_r + np.diag(pen_eye)
+                    cond = float(np.linalg.cond(mat_r))
 
-                # Estágio 2: Resíduo de predição do olho para todas as amostras
-                h_all, v_all = z[:, 0], z[:, 1]
+                beta_eye_0 = np.linalg.solve(mat_r, x_eye_r.T @ w_r @ tgt_c[at_rest])
+
+                # Estágio 2: Resíduo de predição do olho em todos os centróides
+                h_all, v_all = z_c[:, 0], z_c[:, 1]
                 cols_all = [np.ones(len(h_all)), h_all, v_all]
                 if self.degree == 2:
-                    if getattr(self, "basis", "symmetric") == "symmetric":
-                        cols_all += [h_all * v_all, h_all * np.abs(h_all), v_all * np.abs(v_all)]
-                    else:
-                        cols_all += [h_all * v_all, h_all ** 2, v_all ** 2]
+                    cols_all += [h_all * v_all, h_all * np.abs(h_all), v_all * np.abs(v_all)]
                 if self.use_lid:
-                    cols_all.append(z[:, 2])
-                X_eye_all = np.column_stack(cols_all)
+                    cols_all.append(z_c[:, 2])
+                x_eye_all = np.column_stack(cols_all)
 
-                res = targets - X_eye_all @ beta_eye
+                res = tgt_c - x_eye_all @ beta_eye_0
 
                 # Projeção ortogonal física das variáveis de cabeça (zero cross-talk)
-                zh = z[:, pc:pc + 4]
-                X_hx = zh[:, [0, 2]]
+                zh = z_c[:, pc:pc + 4]
+                x_hx = zh[:, [0, 2]]
                 pen_hx = np.diag([lam * self.pose_ridge_factor, lam * self.pose_ridge_factor])
-                b_hx = np.linalg.solve(X_hx.T @ X_hx + pen_hx, X_hx.T @ res[:, 0])
+                b_hx = np.linalg.solve(x_hx.T @ w_mat @ x_hx + pen_hx, x_hx.T @ w_mat @ res[:, 0])
 
-                X_hy = zh[:, [1, 3]]
+                x_hy = zh[:, [1, 3]]
                 pen_hy = np.diag([lam * self.pose_ridge_factor, lam * self.pose_ridge_factor])
-                b_hy = np.linalg.solve(X_hy.T @ X_hy + pen_hy, X_hy.T @ res[:, 1])
+                b_hy = np.linalg.solve(x_hy.T @ w_mat @ x_hy + pen_hy, x_hy.T @ w_mat @ res[:, 1])
 
                 beta_head = np.zeros((4, 2))
                 beta_head[0, 0] = np.clip(b_hx[0], -self.head_limit_px, self.head_limit_px)
@@ -239,13 +277,17 @@ class GazeMapper:
                 beta_head[1, 1] = np.clip(b_hy[0], -self.head_limit_px, self.head_limit_px)
                 beta_head[3, 1] = np.clip(b_hy[1], -self.head_limit_px, self.head_limit_px)
 
-                self._beta = np.vstack([beta_eye, beta_head])
+                # Passo 3: Refinamento alternado do olho descontando a contribuição da cabeça no Passe 1
+                head_contrib_rest = zh[at_rest] @ beta_head
+                tgt_eye_corr = tgt_c[at_rest] - head_contrib_rest
+                beta_eye_1 = np.linalg.solve(mat_r, x_eye_r.T @ w_r @ tgt_eye_corr)
+
+                self._beta = np.vstack([beta_eye_1, beta_head])
                 return
 
-        x = self._design(raw)
-        beta = np.linalg.solve(x.T @ x + self._penalty(lam, x.shape[1]), x.T @ targets)
+        x = self._design(raw_c)
+        beta = np.linalg.solve(x.T @ w_mat @ x + self._penalty(lam, x.shape[1]), x.T @ w_mat @ tgt_c)
         if self.use_head_pose:
-            # Limite físico: |Δpx| por unidade de z (= 0,1 rad / 0,1 adim.) ≤ head_limit_px.
             first = x.shape[1] - 4
             beta[first:] = np.clip(beta[first:], -self.head_limit_px, self.head_limit_px)
         self._beta = beta
@@ -254,16 +296,31 @@ class GazeMapper:
              pose_ref: np.ndarray | None) -> float:
         errs = []
         for p in points:
-            train = idx != p
-            self._solve(raw[train], targets[train], lam, pose_ref)
-            pred = self._design(raw[~train], clip=True) @ self._beta
-            errs.append(np.linalg.norm(pred.mean(axis=0) - targets[~train][0]))
-        return float(np.mean(errs))
+            test_mask = (idx == p)
+            if not np.any(test_mask):
+                continue
+            tgt_p = targets[test_mask][0]
+            if not self.use_head_pose:
+                same_tgt = np.linalg.norm(targets - tgt_p, axis=1) < 2.0
+                train = ~same_tgt
+            else:
+                train = ~test_mask
+
+            unique_train_pts = len(np.unique(idx[train]))
+            if unique_train_pts < self.num_terms:
+                continue
+            try:
+                self._solve(raw[train], targets[train], idx[train], lam, pose_ref)
+                pred = self._design(raw[test_mask], clip=True) @ self._beta
+                errs.append(float(np.linalg.norm(pred.mean(axis=0) - tgt_p)))
+            except (np.linalg.LinAlgError, ValueError):
+                continue
+        return float(np.mean(errs)) if errs else 999.0
 
     def _candidates(self, n_points: int, pose_ok: bool, lid_ok: bool):
         max_deg = self.degree
         for degree in range(1, max_deg + 1):
-            bases = ("symmetric", "quadratic") if degree == 2 else ("linear",)
+            bases = ("symmetric",) if degree == 2 else ("linear",)
             for basis in bases:
                 for lid in ((False, True) if (self.use_lid and lid_ok) else (False,)):
                     for pose in ((False, True) if (self.use_head_pose and pose_ok) else (False,)):
@@ -314,7 +371,7 @@ class GazeMapper:
                 loo = self._loo(raw, targets, idx, points, self.ridge_lambda, ref)
 
         raw = self._raw(a[:, 0], a[:, 1], a[:, 2], a[:, 3], a[:, 7], a[:, 8], a[:, 9])
-        self._solve(raw, targets, self.ridge_lambda, ref)
+        self._solve(raw, targets, idx, self.ridge_lambda, ref)
         if self.use_head_pose:
             pc = self._pose_col
             self._pose_max = np.abs(raw[:, pc:pc + 2] - self._mu[pc:pc + 2]).max(axis=0)

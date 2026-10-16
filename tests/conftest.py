@@ -134,3 +134,14 @@ def tk_root() -> Generator:
             root.destroy()
         except Exception:
             pass
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_file(tmp_path, monkeypatch) -> None:
+    """Garante que a execução de testes nunca altere settings/config.json no repositório."""
+    temp_config = tmp_path / "config.json"
+    import lorena.paths
+    monkeypatch.setattr(lorena.paths, "CONFIG_FILE", temp_config)
+    import lorena.ui.main_window
+    monkeypatch.setattr(lorena.ui.main_window.paths, "CONFIG_FILE", temp_config)
+

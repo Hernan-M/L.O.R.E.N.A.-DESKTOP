@@ -80,45 +80,82 @@ class OutlierGate:
         self._ref: np.ndarray | None = None
         self._pending: list[np.ndarray] = []
 
+    def apply_shift(self, shift: np.ndarray) -> None:
+        """Aplica deslocamento físico de cabeça na referência sem resetar o gate."""
+        if self._ref is not None:
+            self._ref = self._ref + shift
+
     def __call__(self, p: np.ndarray, shift: np.ndarray | None = None) -> np.ndarray:
         if self._ref is None:
-            self._ref = p
+            self._ref = p.copy()
             return p
-        if shift is not None:
-            self._ref = self._ref + shift
-        if np.linalg.norm(p - self._ref) <= self.jump_px:
+        ref_cand = self._ref + shift if shift is not None else self._ref
+        if np.linalg.norm(p - ref_cand) <= self.jump_px:
             self._pending.clear()
-            self._ref = p
+            self._ref = p.copy()
             return p
         if self._pending and np.linalg.norm(p - self._pending[0]) > self.jump_px:
             self._pending = []  # candidatos inconsistentes entre si: recomeça
-        self._pending.append(p)
+        self._pending.append(p.copy())
         if len(self._pending) >= self.confirm_frames:
-            self._ref = np.mean(self._pending, axis=0)
+            if len(self._pending) >= 2:
+                self._ref = 0.3 * self._pending[-2] + 0.7 * self._pending[-1]
+            else:
+                self._ref = self._pending[-1].copy()
             self._pending.clear()
         return self._ref
 
 
 class FixationStabilizer:
-    """Zona morta: enquanto o olhar fica dentro de ``radius`` do centro da
-    fixação, o cursor não se move (absorve micro-sacadas fisiológicas)."""
+    """Zona morta contínua C^0: núcleo estrito (0.5 R) + anel de transição quadrática suave.
 
-    def __init__(self, radius_px: float) -> None:
+    Absorve micro-sacadas sem degrau visual e mantém a âncora de fixação para clique por permanência.
+    """
+
+    def __init__(self, radius_px: float, inner_ratio: float = 0.5) -> None:
         self.radius_px = radius_px
+        self.inner_ratio = inner_ratio
         self.reset()
 
     def reset(self) -> None:
         self.center: np.ndarray | None = None
+        self._anchor: np.ndarray | None = None
         self.fixation_start: float = 0.0
 
     def __call__(self, p: np.ndarray, t: float) -> np.ndarray:
-        if self.center is None or np.linalg.norm(p - self.center) > self.radius_px:
-            self.center = p
+        if self.center is None or self._anchor is None:
+            self.center = p.copy()
+            self._anchor = p.copy()
             self.fixation_start = t
+            return self.center
+
+        r = self.radius_px
+        r_in = self.inner_ratio * r
+        d = float(np.linalg.norm(p - self.center))
+
+        if d <= r_in or d < 1e-9:
+            c_new = self.center
+        elif d <= r:
+            u = (p - self.center) / d
+            s = (d - r_in) / max(r - r_in, 1e-6)
+            c_new = self.center + (s * s * (d - r_in)) * u
+        else:
+            u = (p - self.center) / d
+            c_new = p - r_in * u
+
+        # Ancoragem do dwell timer enquanto permanecer no raio de fixação da âncora
+        dist_from_anchor = float(np.linalg.norm(c_new - self._anchor))
+        if dist_from_anchor <= r:
+            self.center = c_new
+        else:
+            self.center = c_new
+            self._anchor = c_new.copy()
+            self.fixation_start = t
+
         return self.center
 
     def fixation_duration(self, t: float) -> float:
-        return 0.0 if self.center is None else t - self.fixation_start
+        return 0.0 if self.center is None else max(0.0, t - self.fixation_start)
 
 
 class DwellClicker:
